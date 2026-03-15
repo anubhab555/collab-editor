@@ -1,4 +1,4 @@
-# Collab Editor Monorepo
+# Collab Editor
 
 ## Setup
 1. `npm install` (at root)
