@@ -1,39 +1,31 @@
-const mongoose = require("mongoose")
-const Document = require("./Document")
+const http = require("http")
+const { Server } = require("socket.io")
 
-mongoose.connect("mongodb://localhost/collab-editor")
+const connectToDatabase = require("./config/db")
+const registerSocketHandlers = require("./websocket/socketHandler")
 
-const io = require("socket.io")(3001, {
-    cors: {
-        origin: "http://localhost:3000",
-        methods: ["GET", "POST"]
-    }
-})
+const PORT = Number(process.env.SOCKET_PORT) || 3001
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:3000"
 
-const defaultValue = ""
+async function startServer() {
+    await connectToDatabase()
 
-io.on("connection", socket => {
-    socket.on("get-document", async documentId => {
-        const document = await findOrCreateDocument(documentId)
-        socket.join(documentId)
-        socket.emit("load-document", document.data);
-
-        socket.on('send-changes', (delta) => {
-            socket.broadcast.to(documentId).emit("receive-changes", delta);
-        })
-
-        socket.on("save-document", async data => {
-            await Document.findByIdAndUpdate(documentId, { data })  
-        })
-
+    const httpServer = http.createServer()
+    const io = new Server(httpServer, {
+        cors: {
+            origin: CLIENT_ORIGIN,
+            methods: ["GET", "POST"],
+        },
     })
-})
 
-async function findOrCreateDocument(id) {
-    if (id == null) return
+    registerSocketHandlers(io)
 
-    const document = await Document.findById(id)
-    if (document) return document
-
-    return await Document.create({ _id: id, data: defaultValue })
+    httpServer.listen(PORT, () => {
+        console.log(`Socket server listening on port ${PORT}`)
+    })
 }
+
+startServer().catch((error) => {
+    console.error("Failed to start backend server", error)
+    process.exit(1)
+})
