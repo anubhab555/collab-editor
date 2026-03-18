@@ -20,6 +20,8 @@ body {
     border: none;
     display: flex;
     justify-content: center;
+    overflow: visible;
+    position: relative;
 }
 
 .container .ql-toolbar.ql-snow {
@@ -32,6 +34,44 @@ body {
     background-color: #f3f3f3;
     border: none;
     box-shadow: 0 0 5px 0 rgba(0, 0, 0, 0.5);
+}
+
+.remote-cursor-layer {
+    inset: 0;
+    overflow: visible;
+    pointer-events: none;
+    position: absolute;
+}
+
+.remote-cursor {
+    left: 0;
+    pointer-events: none;
+    position: absolute;
+    top: 0;
+}
+
+.remote-cursor__caret {
+    background-color: var(--cursor-color, #1864ab);
+    border-radius: 999px;
+    height: var(--cursor-height, 20px);
+    margin-left: -1px;
+    width: 2px;
+}
+
+.remote-cursor__label {
+    background-color: var(--cursor-color, #1864ab);
+    border-radius: 999px;
+    color: white;
+    font-family: "Segoe UI", sans-serif;
+    font-size: 0.7rem;
+    font-weight: 600;
+    left: 0;
+    line-height: 1;
+    padding: 0.2rem 0.45rem;
+    position: absolute;
+    top: -1.2rem;
+    transform: translateX(-0.1rem);
+    white-space: nowrap;
 }
 
 @page {
@@ -52,6 +92,10 @@ body {
     }
 
     .container .ql-toolbar.ql-snow {
+        display: none;
+    }
+
+    .remote-cursor-layer {
         display: none;
     }
 }
