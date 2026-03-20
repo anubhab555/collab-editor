@@ -10,6 +10,7 @@ import CursorManager from "./CursorManager"
 
 const SAVE_INTERVAL_MS = 2000
 const CURSOR_EMIT_INTERVAL_MS = 75
+const SOCKET_SERVER_URL = process.env.REACT_APP_SOCKET_URL || "http://localhost:3001"
 const TOOLBAR_OPTIONS = [
     [{ header: [1, 2, 3, 4, 5, 6, false] }],
     [{ font: [] }],
@@ -146,7 +147,7 @@ export default function TextEditor() {
     }, [socket])
 
     useEffect(() => {
-        const s = io("http://localhost:3001")
+        const s = io(SOCKET_SERVER_URL)
         setSocket(s)
 
         return () => {
