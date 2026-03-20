@@ -13,6 +13,7 @@ Use it to track:
 Use these docs when you want to study the concepts, not just the change log:
 
 - [Architecture](./ARCHITECTURE.md)
+- [Local Dev Setup](./LOCAL_DEV_SETUP.md)
 - [Learning Path](./LEARNING_PATH.md)
 - [Realtime Collaboration 101](./REALTIME_COLLABORATION_101.md)
 - [Redis Scaling 101](./REDIS_SCALING_101.md)
@@ -84,14 +85,17 @@ What changed:
 - Added explicit Redis logs for single-node mode, pub/sub connection, and adapter enablement.
 - Made the frontend Socket.io base URL configurable with `REACT_APP_SOCKET_URL` for local multi-instance verification.
 - Added local dev scripts to run two backend instances and a second frontend instance on a different port.
+- Added default local CORS support for both `http://localhost:3000` and `http://localhost:3003`.
+- Documented the Docker-based Redis runbook, including clean outage testing with `docker stop collab-redis`.
 
 Why it changed:
 - Cursor tracking and delta sync were still tied to one Node.js process.
 - Redis is the scaling layer that lets realtime events propagate across multiple backend instances.
+- The local verification path also needed to be explicit so the scaling story can be demonstrated reliably from scratch.
 
 Interview explanation:
 - I introduced the Socket.io Redis adapter so document and cursor events work across horizontally scaled Node.js instances.
-- I made the setup operationally safer with bounded reconnect backoff, explicit mode logging, and graceful shutdown for the Redis clients.
+- I made the setup operationally safer with bounded reconnect backoff, explicit mode logging, graceful shutdown, and a documented local validation flow using Docker-managed Redis.
 
 Learning docs for this phase:
 
@@ -112,3 +116,24 @@ Why it changed:
 
 Interview explanation:
 - I documented both the implementation and the underlying concepts so I can explain not just the code, but also the system design choices, limitations, and future roadmap in a structured way.
+
+## 2026-03-20 - Local development workflow
+Status: Implemented
+
+What changed:
+- Added root helper scripts to start, stop, inspect, and reset local MongoDB for development.
+- Added a dedicated [Local Dev Setup](./LOCAL_DEV_SETUP.md) runbook that explains startup, reset flow, and manual testing.
+- Kept runtime MongoDB data and logs out of the repo as part of the local development story.
+- Documented how browser identity affects cursor testing so new contributors can validate the feature correctly.
+
+Why it changed:
+- New contributors need a clean way to run the project without reverse-engineering the local environment.
+- The testing flow also needed to explain the current browser-identity behavior for cursor validation.
+
+Interview explanation:
+- I improved the local developer experience with a simple runbook and helper scripts so the project is easier to start, test, and explain.
+
+Learning docs for this phase:
+
+- [Local Dev Setup](./LOCAL_DEV_SETUP.md)
+- [Architecture](./ARCHITECTURE.md)

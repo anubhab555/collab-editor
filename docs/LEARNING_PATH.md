@@ -15,11 +15,13 @@ The idea is simple:
 
 Read:
 
+- [Local Dev Setup](./LOCAL_DEV_SETUP.md)
 - [Architecture](./ARCHITECTURE.md)
 - [Design Flow](./Design%20Flow.md)
 
 After this, you should be able to answer:
 
+- How do I start the project locally without MongoDB confusion?
 - What does the app do today?
 - Which parts are already implemented?
 - Which parts are still planned?

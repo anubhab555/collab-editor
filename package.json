@@ -4,6 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "mongo:start": "powershell -ExecutionPolicy Bypass -File ./scripts/start-local-mongo.ps1",
+    "mongo:status": "powershell -ExecutionPolicy Bypass -File ./scripts/status-local-mongo.ps1",
+    "mongo:stop": "powershell -ExecutionPolicy Bypass -File ./scripts/stop-local-mongo.ps1",
+    "mongo:reset": "powershell -ExecutionPolicy Bypass -File ./scripts/reset-local-mongo.ps1",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

@@ -6,7 +6,19 @@ const initializeRedisAdapter = require("./config/redisAdapter")
 const registerSocketHandlers = require("./websocket/socketHandler")
 
 const PORT = Number(process.env.SOCKET_PORT) || 3001
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:3000"
+const DEFAULT_CLIENT_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3003",
+]
+
+function getAllowedClientOrigins() {
+    const configuredOrigins = process.env.CLIENT_ORIGIN
+        ?.split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean)
+
+    return configuredOrigins?.length ? configuredOrigins : DEFAULT_CLIENT_ORIGINS
+}
 
 function registerGracefulShutdown(httpServer, cleanupRedis) {
     let isShuttingDown = false
@@ -49,11 +61,12 @@ function registerGracefulShutdown(httpServer, cleanupRedis) {
 
 async function startServer() {
     await connectToDatabase()
+    const allowedClientOrigins = getAllowedClientOrigins()
 
     const httpServer = http.createServer()
     const io = new Server(httpServer, {
         cors: {
-            origin: CLIENT_ORIGIN,
+            origin: allowedClientOrigins,
             methods: ["GET", "POST"],
         },
     })
@@ -64,6 +77,7 @@ async function startServer() {
 
     httpServer.listen(PORT, () => {
         console.log(`Socket server listening on port ${PORT}`)
+        console.log(`[Server] Allowed client origins: ${allowedClientOrigins.join(", ")}`)
     })
 }
 

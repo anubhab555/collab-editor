@@ -12,6 +12,7 @@ The most important truth to remember is this:
 
 If you want the step-by-step change history, read [Design Flow](./Design%20Flow.md).
 If you want beginner-friendly explanations of the concepts, start with [Learning Path](./LEARNING_PATH.md).
+If you want the exact local startup steps, read [Local Dev Setup](./LOCAL_DEV_SETUP.md).
 
 ## Current System At A Glance
 
@@ -89,6 +90,8 @@ There are two valid runtime modes today:
 
 In production, a load balancer must support sticky sessions or use a WebSocket-aware proxy.
 
+For local Redis verification on this machine, the scaling layer is provided by a Docker-managed Redis container on `localhost:6379`.
+
 ## Main Components
 
 ### Frontend
@@ -144,6 +147,18 @@ Documents are stored in MongoDB roughly like this:
 
 This is simple and works well for the current phase.
 It is not yet versioned history.
+
+For local development, the backend now defaults to:
+
+```text
+mongodb://127.0.0.1:27017/collab-editor
+```
+
+The local MongoDB data path used by the helper scripts is:
+
+```text
+%LOCALAPPDATA%\collab-editor\mongo\data
+```
 
 ## Collaboration Model Today
 
@@ -211,6 +226,7 @@ The Redis adapter is implemented in `backend/config/redisAdapter.js`.
 
 - env-gated enablement through `REDIS_URL`
 - bounded reconnect delay using `Math.min(retries * 50, 2000)`
+- default local multi-instance CORS support for `http://localhost:3000` and `http://localhost:3003`
 - explicit logs:
   - `[Redis] Running in single-node mode`
   - `[Redis] Connected to pub/sub`
@@ -283,6 +299,8 @@ These are the beginner-friendly companion docs for interview prep:
 ### Single-node mode
 
 ```bash
+# MongoDB available
+
 cd backend
 npm run devStart
 
@@ -290,10 +308,16 @@ cd frontend
 npm start
 ```
 
+Use this mode when you want the editor to work without Redis. Editing, cursors, and autosave still work; only cross-instance propagation is absent.
+
 ### Redis-scaled mode
 
 ```bash
-# Redis on localhost:6379
+# First time only:
+docker run --name collab-redis -p 6379:6379 -d redis:7
+
+# Later runs:
+docker start collab-redis
 
 cd backend
 npm run devStart:redis
@@ -313,6 +337,38 @@ Open the same document in both frontend instances and verify:
 - text sync
 - cursor sync
 - document persistence
+- document isolation on different document IDs
+
+For the failure test, stop Redis with:
+
+```bash
+docker stop collab-redis
+```
+
+Then rerun `npm run devStart:redis` and confirm the backend fails loudly instead of silently falling back.
+Pausing Docker Engine is not the preferred validation because it can freeze the dependency rather than simulate a clean Redis outage.
+
+## Cursor Identity Note
+
+If you open two normal tabs in the same browser profile, they usually share the same `localStorage` identity.
+
+That means they are useful for testing:
+
+- text sync
+- document isolation
+- autosave
+
+But they are not the right test for two distinct collaborators with different cursor labels.
+
+To test different remote cursors correctly, use:
+
+- normal window plus incognito/private window
+- two browser profiles
+- or two different browsers
+
+This is a deliberate result of the current identity model, not a cursor bug.
+
+In the local Redis-scaled flow, `localhost:3000` and `localhost:3003` are different origins, so they naturally use different browser storage and appear as separate collaborators.
 
 ## Interview One-Liner
 
