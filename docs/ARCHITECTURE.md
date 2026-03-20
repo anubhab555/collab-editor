@@ -1,343 +1,321 @@
-# Collab Editor
+# Collab Editor Architecture
 
-A real-time collaborative text editor where multiple users edit the same document simultaneously — with live cursor tracking, automatic persistence, and instant synchronization. Think Google Docs, built from scratch with React, Quill, Socket.io, and MongoDB.
+This document explains what the project does today, how the main parts fit together, and what is still planned.
 
-> **8 source files. ~600 lines of custom code. 12 production features.**
+The most important truth to remember is this:
 
-## What Makes This Technically Interesting
+- Today, the editor uses delta-based real-time sync with Socket.io.
+- Today, the backend can run in single-node mode or Redis-scaled mode.
+- Today, persistence is handled by MongoDB autosave.
+- Today, the project is not yet a CRDT system.
+- The planned upgrade that changes collaboration correctness in a big way is Yjs.
 
-This isn't a chat-with-shared-textarea demo. The engineering challenges here are the same ones Google Docs, Figma, and Notion solve at scale:
+If you want the step-by-step change history, read [Design Flow](./Design%20Flow.md).
+If you want beginner-friendly explanations of the concepts, start with [Learning Path](./LEARNING_PATH.md).
 
-- **Delta-based operational transformation** — Edits travel as Quill Deltas (insert/delete/retain ops), not full document snapshots. This keeps payloads small and merges conflict-free.
-- **Cursor drift correction** — When User A types at position 10, every remote cursor at position >= 10 must shift forward in real time. `delta.transformPosition()` handles this math on every keystroke.
-- **DOM overlay cursor engine** — Remote cursors are rendered as an absolutely positioned overlay *outside* React's render cycle. A plain ES6 class (`CursorManager`) manipulates the DOM directly with `requestAnimationFrame` batching for performance — no re-renders, no virtual DOM overhead.
-- **WebSocket-only architecture** — Zero REST endpoints. Every client-server interaction (document load, save, edit sync, cursor broadcast) flows through Socket.io events over a single persistent connection.
-- **75ms throttled cursor emission** — A manual throttle (not lodash) with `setTimeout` and pending-range tracking prevents flooding the server while keeping cursors visually smooth.
+## Current System At A Glance
 
-| Metric | Value |
-|--------|-------|
-| Cursor broadcast throttle | 75ms |
-| Autosave interval | 2s |
-| Render batching | requestAnimationFrame |
-| Cursor color palette | 8 deterministic colors |
-| Identity persistence | localStorage across sessions |
+| Area | Current State |
+|------|---------------|
+| Editor | React + Quill |
+| Realtime transport | Socket.io |
+| Collaboration model | Delta broadcast with cursor drift correction |
+| Horizontal scaling | Socket.io Redis adapter when `REDIS_URL` is set |
+| Persistence | MongoDB via Mongoose |
+| Identity | Browser-persisted `localStorage` identity |
+| Cursor rendering | Custom DOM overlay via `CursorManager` |
+| Next major upgrade | CRDT collaboration with Yjs |
 
----
+## Honest Architecture Summary
 
-## System Architecture
+This is the clean way to describe the project in an interview:
+
+- The frontend is a React application that mounts a Quill editor and connects to the backend with Socket.io.
+- The backend is a Node.js Socket.io server with a layered structure for config, services, controllers, and socket handling.
+- Documents are stored in MongoDB and autosaved periodically.
+- Real-time edits and cursor updates are sent through Socket.io rooms keyed by `documentId`.
+- When Redis is enabled, Socket.io uses Redis pub/sub so events can move across multiple backend instances.
+- The current sync model is strong for a portfolio project, but it is still delta-based synchronization, not full CRDT or full OT conflict resolution.
+
+That last point matters. It makes your explanation more credible.
+
+## Runtime Architecture
 
 ```mermaid
 graph TB
-    subgraph Browser["Frontend :3000"]
-        Router["App.js\nReact Router v7"]
-        Editor["TextEditor.js\nQuill + Socket.io"]
-        CM["CursorManager.js\nDOM Overlay Engine"]
+    subgraph Frontend["Frontend"]
+        Browser["Browser tab"]
+        React["React + Quill"]
+        Cursor["CursorManager"]
 
-        Router -->|/documents/:id| Editor
-        Editor -->|instantiates| CM
+        Browser --> React
+        React --> Cursor
     end
 
-    subgraph Server["Backend :3001"]
-        Entry["server.js\nHTTP + Socket.io"]
-        Handler["socketHandler.js\nEvent Router"]
-        Controller["documentController.js"]
-        Service["documentService.js"]
-        Model["Document.js\nMongoose"]
-
-        Entry --> Handler
-        Handler --> Controller
-        Controller --> Service
-        Service --> Model
+    subgraph Proxy["Routing layer"]
+        LB["Load balancer or WebSocket-aware proxy"]
     end
 
-    subgraph DB["Persistence"]
-        Mongo[("MongoDB\ncollab-editor")]
+    subgraph Backend["Backend instances"]
+        NodeA["Node.js + Socket.io :3001"]
+        NodeB["Node.js + Socket.io :3002"]
     end
 
-    Editor <-->|Socket.io WebSocket| Handler
-    Model --> Mongo
-```
-
-**Frontend** — React 19 functional component with 7 `useEffect` hooks managing socket lifecycle, Quill initialization, document loading, autosave, event listeners, and cursor throttle cleanup. `CursorManager` is intentionally *not* a React component — it's a plain class that owns a DOM overlay for zero-overhead cursor rendering.
-
-**Backend** — Layered Node.js architecture. No Express, no REST. A raw HTTP server hosts Socket.io, which routes all events through a handler → controller → service → model pipeline. Each document ID maps to a Socket.io room for scoped broadcasting.
-
-**Database** — MongoDB via Mongoose. Documents are stored as `{ _id: String, data: Mixed }` where `_id` is the UUID from the URL and `data` is the full Quill Delta JSON. Autosaved every 2 seconds via upsert.
-
-| Layer | File | Responsibility |
-|-------|------|---------------|
-| Handler | `socketHandler.js` | Event routing, room join/leave, cursor broadcast |
-| Controller | `documentController.js` | Thin facade mapping actions to services |
-| Service | `documentService.js` | `findOrCreateDocument()`, `saveDocument()` with upsert |
-| Model | `Document.js` | Mongoose schema, no version key |
-| Config | `db.js` | Singleton connection promise |
-
----
-
-## Core Workflows
-
-### Document Lifecycle
-
-```mermaid
-sequenceDiagram
-    participant B as Browser
-    participant S as Server
-    participant DB as MongoDB
-
-    B->>B: Visit / generates UUID
-    B->>B: Redirect to /documents/uuid
-    B->>B: Mount TextEditor, init Quill disabled
-
-    B->>S: get-document(id)
-    S->>DB: findOrCreateDocument(id)
-    DB-->>S: Document data
-    S-->>B: load-document(delta)
-    B->>B: quill.setContents + enable
-
-    B->>S: join-document(id, user metadata)
-
-    loop Every 2 seconds
-        B->>S: save-document(quill.getContents)
-        S->>DB: findByIdAndUpdate upsert
+    subgraph Realtime["Realtime scaling"]
+        Redis[("Redis pub/sub")]
     end
+
+    subgraph Data["Persistence"]
+        Mongo[("MongoDB")]
+    end
+
+    React --> LB
+    LB --> NodeA
+    LB --> NodeB
+    NodeA <--> Redis
+    NodeB <--> Redis
+    NodeA --> Mongo
+    NodeB --> Mongo
 ```
 
-- Visiting `/` generates a UUID v4 and redirects to `/documents/:uuid`
-- Each unique URL is a unique document — share the link to collaborate
-- Server finds or creates the document in MongoDB, joins the socket to that room
-- Autosave runs client-side on a 2s interval via `setInterval`
+### What changes depending on environment
 
-### Real-Time Collaborative Editing
+There are two valid runtime modes today:
 
-```mermaid
-sequenceDiagram
-    participant A as User A
-    participant S as Server
-    participant B as User B
+| Mode | When used | Behavior |
+|------|-----------|----------|
+| Single-node mode | `REDIS_URL` is not set | One backend instance handles all socket events locally |
+| Redis-scaled mode | `REDIS_URL` is set | Multiple backend instances exchange Socket.io events through Redis |
 
-    A->>S: send-changes(delta)
-    S->>B: receive-changes(delta)
-    B->>B: quill.updateContents(delta)
-    B->>B: transformCursors(delta)
-    B->>B: scheduleRender()
-```
+In production, a load balancer must support sticky sessions or use a WebSocket-aware proxy.
 
-When a user types, Quill generates a Delta (e.g., `retain 5, insert "hello"`). The client emits `send-changes` and the server broadcasts `receive-changes` to all other sockets in the room. The receiving client applies the delta and immediately transforms all remote cursor positions to account for shifted text.
+## Main Components
 
-### Cursor System
+### Frontend
 
-The cursor system has three parts: identity, emission, and rendering.
+Main files:
 
-**Identity** — On first visit, the user gets a persistent UUID (`localStorage`) and is prompted for a display name. A deterministic hash maps their ID to one of 8 colors. This persists across sessions.
+- `frontend/src/App.js`
+- `frontend/src/TextEditor.js`
+- `frontend/src/CursorManager.js`
+- `frontend/src/styles.css`
 
-**Emission** — Cursor positions are emitted on every selection change and text change, throttled to 75ms. The throttle is manual: if under 75ms since last emit, the range is stored as `pendingRange` and a `setTimeout` fires for the remainder. On blur or disconnect, a forced `null` range triggers `cursor-remove`.
+Responsibilities:
 
-```mermaid
-flowchart LR
-    A[Selection or text change] --> B{75ms elapsed?}
-    B -->|Yes| C[Emit cursor-move]
-    B -->|No| D[Store pending]
-    D --> E[setTimeout remainder]
-    E --> C
-    C --> F[Server broadcasts\ncursor-update to room]
-```
+- Create or open a document URL
+- Initialize Quill
+- Connect to the Socket.io backend
+- Send document edits as Quill deltas
+- Send cursor positions
+- Render remote cursors efficiently
+- Persist user identity in `localStorage`
 
-**Rendering** — `CursorManager` maintains a `Map` of remote cursors. On `cursor-update`, it calls `upsertCursor()` which stores the range and schedules a render. Rendering uses `requestAnimationFrame` to batch DOM updates:
+### Backend
 
-1. For each cursor, call `quill.getBounds(index, length)` to get pixel coordinates
-2. Position a `.remote-cursor` marker via CSS `transform: translate()`
-3. The marker contains a colored caret (`.remote-cursor__caret`) and a name label (`.remote-cursor__label`)
+Main files:
 
-**Drift correction** — When any text change arrives (local or remote), `transformCursors(delta)` runs `delta.transformPosition()` on every stored cursor range, shifting positions to stay correct. Ranges are clamped to document bounds to prevent out-of-bounds rendering.
+- `backend/server.js`
+- `backend/config/db.js`
+- `backend/config/redisAdapter.js`
+- `backend/websocket/socketHandler.js`
+- `backend/services/documentService.js`
+- `backend/models/Document.js`
 
-**Cleanup** — Cursors are removed on editor blur, document switch, or socket disconnect. `CursorManager.destroy()` tears down all event listeners and cancels pending animation frames. Scroll and resize events trigger `scheduleRender()` to reposition cursors.
+Responsibilities:
 
-### Room Management
+- Start the Socket.io server
+- Connect to MongoDB
+- Optionally enable the Redis adapter
+- Join sockets to document rooms
+- Broadcast text changes and cursor changes
+- Save documents to MongoDB
+- Cleanly shut down Redis clients when the process exits
 
-```mermaid
-stateDiagram-v2
-    [*] --> Connected : Socket connects
-    Connected --> InRoom : get-document
-    InRoom --> InRoom : editing / cursors / saving
-    InRoom --> Switching : get-document new id
-    Switching --> InRoom : joined new room
-    InRoom --> [*] : disconnect
-```
+### Database
 
-The server tracks per-socket state in `socket.data`:
+Documents are stored in MongoDB roughly like this:
+
 ```js
-socket.data = {
-    documentId: "current-doc-uuid",
-    user: { clientId, displayName, color }
+{
+  _id: "document-uuid",
+  data: <Quill Delta JSON>
 }
 ```
 
-When switching documents, the server emits `cursor-remove` to the old room, leaves it, and joins the new one. On disconnect, `cursor-remove` broadcasts to the current room.
+This is simple and works well for the current phase.
+It is not yet versioned history.
 
----
+## Collaboration Model Today
 
-## Socket.io Protocol Reference
+### Document load flow
 
-Every client-server interaction uses these events. No REST endpoints exist.
+1. The browser opens `/documents/:id`.
+2. The frontend emits `get-document(documentId)`.
+3. The backend finds or creates the document in MongoDB.
+4. The socket joins the room named after that `documentId`.
+5. The backend emits `load-document`.
+6. The client loads the Quill contents and enables editing.
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant S as Server
-    participant DB as MongoDB
+### Edit flow
 
-    Note over C,S: Connection
+1. The user types in Quill.
+2. Quill produces a Delta.
+3. The frontend emits `send-changes(delta)`.
+4. The backend broadcasts `receive-changes(delta)` to the rest of the room.
+5. Other clients apply the delta with `quill.updateContents(delta)`.
 
-    C->>S: get-document(documentId)
-    S->>DB: findOrCreateDocument(id)
-    S->>S: socket.join(documentId)
-    S-->>C: load-document(delta)
+### Cursor flow
 
-    C->>S: join-document(documentId, user)
-    S->>S: store on socket.data
+1. The user moves their caret or types.
+2. The frontend emits a throttled `cursor-move`.
+3. The backend uses room-scoped broadcasting to forward `cursor-update`.
+4. Other clients store the remote cursor state in `CursorManager`.
+5. `CursorManager` renders the markers with `requestAnimationFrame`.
 
-    Note over C,S: Collaboration
+### Autosave flow
 
-    C->>S: send-changes(delta)
-    S-->>C: receive-changes(delta) broadcast
+1. Every 2 seconds, the client emits `save-document(quill.getContents())`.
+2. The backend upserts the document in MongoDB.
 
-    C->>S: cursor-move(range)
-    S-->>C: cursor-update(user, range) broadcast
+## Why Cursor Drift Correction Exists
 
-    C->>S: save-document(delta)
-    S->>DB: upsert
+Cursor drift is one of the first real problems in collaborative editors.
 
-    Note over C,S: Cleanup
+Example:
 
-    S-->>C: cursor-remove(clientId) broadcast
-```
+- User B's cursor is at index 10
+- User A inserts 5 characters at index 5
+- User B's cursor should now move to index 15
 
-| Event | Direction | Payload | Purpose |
-|-------|-----------|---------|---------|
-| `get-document` | Client to Server | `documentId` | Request document, join room |
-| `load-document` | Server to Client | Quill Delta | Deliver document contents |
-| `join-document` | Client to Server | `{ documentId, user }` | Register collaborator metadata |
-| `send-changes` | Client to Server | Quill Delta | Broadcast edit to room |
-| `receive-changes` | Server to Client | Quill Delta | Apply remote edit |
-| `cursor-move` | Client to Server | `{ range }` | Broadcast cursor position |
-| `cursor-update` | Server to Client | `{ user, range }` | Render remote cursor |
-| `cursor-remove` | Server to Client | `{ clientId }` | Remove cursor marker |
-| `save-document` | Client to Server | Quill Delta | Persist to MongoDB |
+The project handles that today by transforming stored cursor positions with Quill Delta `transformPosition(...)`.
 
----
+This is a strong real-time feature, but it does not mean the whole editor is already a full CRDT system.
 
-## Getting Started
+## What Redis Adds
 
-### Prerequisites
+Without Redis:
 
-- Node.js (v18+)
-- MongoDB running locally on default port (27017)
+- backend instance A only knows about sockets connected to A
+- backend instance B only knows about sockets connected to B
+- users connected to different backend instances will not see each other's real-time events
 
-### Run the project
+With Redis:
+
+- backend instance A publishes socket events through Redis
+- backend instance B receives the same events through Redis
+- document edits and cursor updates work across multiple Node.js processes
+
+The Redis adapter is implemented in `backend/config/redisAdapter.js`.
+
+### Operational details added in this phase
+
+- env-gated enablement through `REDIS_URL`
+- bounded reconnect delay using `Math.min(retries * 50, 2000)`
+- explicit logs:
+  - `[Redis] Running in single-node mode`
+  - `[Redis] Connected to pub/sub`
+  - `[Redis] Adapter enabled`
+- graceful shutdown on `SIGINT` and `SIGTERM`
+
+## Architecture Decisions Worth Explaining In Interviews
+
+### Why Socket.io instead of plain WebSocket?
+
+- Easier room-based broadcasting
+- Helpful reconnect and event abstractions
+- Better developer velocity for a project like this
+
+### Why MongoDB for now?
+
+- Easy document-shaped storage for Quill Delta JSON
+- Fast to iterate on for a real-time editor prototype
+
+### Why custom cursor rendering?
+
+- Remote cursors need frequent updates
+- A DOM overlay lets the app avoid unnecessary React re-renders
+- `requestAnimationFrame` batching reduces layout thrashing
+
+### Why Redis as the next scaling step?
+
+- It solves cross-instance event propagation
+- It is a realistic production concern for WebSocket systems
+- It gives the project a stronger distributed-systems story
+
+## What The Project Is Not Yet
+
+It is important to explain the limits clearly.
+
+The project is not yet:
+
+- a CRDT-based editor
+- a Yjs-powered shared document system
+- a version-history system
+- a Dockerized deployment
+- a Kubernetes deployment
+
+Those are planned future improvements, not current features.
+
+## Code Reading Order
+
+If you want to understand the code quickly, read in this order:
+
+1. `frontend/src/TextEditor.js`
+2. `frontend/src/CursorManager.js`
+3. `backend/websocket/socketHandler.js`
+4. `backend/config/redisAdapter.js`
+5. `backend/server.js`
+6. `backend/services/documentService.js`
+
+## Learning Docs
+
+These are the beginner-friendly companion docs for interview prep:
+
+- [Learning Path](./LEARNING_PATH.md)
+- [Realtime Collaboration 101](./REALTIME_COLLABORATION_101.md)
+- [Redis Scaling 101](./REDIS_SCALING_101.md)
+- [CRDT and Yjs 101](./CRDT_YJS_101.md)
+- [Docker and Kubernetes 101](./DOCKER_KUBERNETES_101.md)
+- [Design Flow](./Design%20Flow.md)
+
+## Local Verification Setup
+
+### Single-node mode
 
 ```bash
-# Terminal 1: Start the backend
 cd backend
-npm install
-npm run dev        # nodemon on port 3001
+npm run devStart
 
-# Terminal 2: Start the frontend
 cd frontend
-npm install
-npm start          # React dev server on port 3000
+npm start
 ```
 
-Open `http://localhost:3000` — you'll be redirected to a new document. Open the same URL in a second browser tab to see real-time collaboration.
+### Redis-scaled mode
 
-### Where to start reading code
+```bash
+# Redis on localhost:6379
 
-| If you want to understand... | Start here |
-|------------------------------|-----------|
-| How the editor works | `frontend/src/TextEditor.js` — single component, all hooks |
-| How cursors render | `frontend/src/CursorManager.js` — standalone ES6 class |
-| How events are handled server-side | `backend/websocket/socketHandler.js` — all Socket.io events |
-| How documents are persisted | `backend/services/documentService.js` — MongoDB operations |
-| How routing works | `frontend/src/App.js` — 4 lines of React Router |
+cd backend
+npm run devStart:redis
 
-### Environment variables
+cd backend
+npm run devStart:redis:3002
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `SOCKET_PORT` | `3001` | Backend server port |
-| `CLIENT_ORIGIN` | `http://localhost:3000` | CORS origin for Socket.io |
-| `MONGODB_URI` | `mongodb://localhost/collab-editor` | MongoDB connection string |
+cd frontend
+npm start
 
----
-
-## Project Structure
-
-```
-collab-editor/
-├── .claude/
-│   └── skills/
-│       ├── skill-creator/SKILL.md
-│       └── doc-coauthoring/SKILL.md
-├── docs/
-│   ├── ARCHITECTURE.md              <-- you are here
-│   └── CLAUDE_SKILLS.md
-├── backend/
-│   ├── server.js                    # HTTP + Socket.io entry
-│   ├── config/db.js                 # Mongoose connection
-│   ├── controllers/documentController.js
-│   ├── models/Document.js           # { _id: String, data: Mixed }
-│   ├── services/documentService.js  # find-or-create, upsert
-│   └── websocket/socketHandler.js   # All event handlers
-├── frontend/src/
-│   ├── index.js                     # React 19 entry
-│   ├── App.js                       # Router: / -> /documents/:uuid
-│   ├── TextEditor.js                # Editor component + all hooks
-│   ├── CursorManager.js             # Remote cursor DOM overlay
-│   └── styles.css                   # Layout + cursors + print
-├── package.json
-└── README.md
+cd frontend
+npm run start:socket3002
 ```
 
----
+Open the same document in both frontend instances and verify:
 
-## Feature Matrix
+- text sync
+- cursor sync
+- document persistence
 
-| Feature | Key Files |
-|---------|-----------|
-| Real-time collaborative editing | `TextEditor.js`, `socketHandler.js` |
-| Document persistence with autosave | `documentService.js`, `Document.js` |
-| UUID-based document routing | `App.js` |
-| Browser-persisted collaborator identity | `TextEditor.js` (localStorage) |
-| Live remote cursor tracking | `CursorManager.js`, `socketHandler.js` |
-| Delta-aware cursor drift correction | `CursorManager.js` transformCursors |
-| Throttled cursor emission at 75ms | `TextEditor.js` emitCursorMove |
-| 8-color deterministic cursor palette | `TextEditor.js` getStableHash |
-| Scroll/resize responsive cursors | `CursorManager.js` event listeners |
-| Print-safe rendering | `styles.css` @media print |
-| Room management with session cleanup | `socketHandler.js` emitCursorRemoval |
-| Rich text toolbar | `TextEditor.js` TOOLBAR_OPTIONS |
+## Interview One-Liner
 
----
+If you need a fast summary:
 
-## Tech Stack
-
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| UI Framework | React | 19.x |
-| Rich Text Editor | Quill | 2.x |
-| Real-time Transport | Socket.io | 4.x |
-| Client Routing | react-router-dom | 7.x |
-| ODM | Mongoose | 9.x |
-| Database | MongoDB | - |
-| Build | Create React App | 5.x |
-| Dev Server | nodemon | 3.x |
-
----
-
-## Changelog
-
-| Date | Change |
-|------|--------|
-| 2026-03-18 | Architecture doc rewritten with doc-coauthoring workflow |
-| 2026-03-17 | CursorManager, remote cursor tracking, throttled emission |
-| 2026-03-15 | Backend refactor: layered architecture |
-| 2026-03-15 | MongoDB integration, Quill editor, basic real-time editing |
+> I built a real-time collaborative editor with React, Quill, Socket.io, MongoDB, and Redis. The current version supports delta-based editing, cursor tracking with drift correction, MongoDB autosave, and cross-instance Socket.io scaling through Redis. The next major step is upgrading collaboration correctness with Yjs and CRDTs.

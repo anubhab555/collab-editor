@@ -1,0 +1,166 @@
+# Realtime Collaboration 101
+
+This document teaches the core ideas behind the current project in simple language.
+
+## 1. What problem are we solving?
+
+A collaborative editor lets multiple people work on the same document at the same time.
+
+That sounds simple, but there are several moving parts:
+
+- everyone must see edits quickly
+- everyone must stay in sync
+- cursors should feel live
+- data should still be saved if the page reloads
+
+This project solves that with:
+
+- React for the UI
+- Quill for the editor
+- Socket.io for real-time events
+- MongoDB for persistence
+
+## 2. What is a WebSocket?
+
+A WebSocket is a long-lived connection between browser and server.
+
+Normal HTTP is request-response:
+
+- browser sends a request
+- server sends a response
+- connection is done
+
+A WebSocket stays open:
+
+- browser and server can both send messages at any time
+- this is useful for chat, live dashboards, multiplayer apps, and collaborative editors
+
+## 3. Why use Socket.io instead of raw WebSocket?
+
+Socket.io is a library built on top of the WebSocket idea.
+
+It gives helpful features like:
+
+- named events such as `send-changes` or `cursor-update`
+- rooms, so one document's users do not receive another document's events
+- reconnect behavior
+- a simpler developer experience
+
+So the project is still a real-time WebSocket-style system, but Socket.io makes it much easier to build.
+
+## 4. What is a room?
+
+A room is just a group of sockets.
+
+In this project:
+
+- each `documentId` becomes a room
+- users editing the same document join the same room
+- broadcasts go only to that room
+
+That means:
+
+- document A users do not receive document B events
+- the server can scope edit and cursor events correctly
+
+## 5. What is a Quill Delta?
+
+Quill does not just think in terms of "the full document string."
+It can express edits as operations.
+
+Example:
+
+```js
+retain 5, insert "hello"
+```
+
+That means:
+
+- keep the first 5 characters
+- then insert `"hello"`
+
+This is useful because:
+
+- payloads are smaller than sending the whole document every time
+- the app can apply only the change, not rewrite everything
+
+## 6. Is the current app already OT or CRDT?
+
+Not fully.
+
+This is an important interview point.
+
+The current app uses delta-based synchronization, but it is not yet a full conflict-resolution engine like a CRDT system.
+
+A truthful explanation is:
+
+- Quill Deltas are the change format
+- Socket.io is the transport
+- remote clients apply incoming deltas
+- cursor positions are transformed to reduce drift
+- full CRDT collaboration is still planned through Yjs
+
+This answer is much better than pretending the app already solves every merge conflict perfectly.
+
+## 7. Why do cursors drift?
+
+Suppose:
+
+- User B's cursor is at index 10
+- User A inserts text before index 10
+
+Now index 10 is no longer the same place in the document.
+
+So if you keep User B's cursor at the old index, it looks wrong.
+
+This is called cursor drift.
+
+The project reduces that by transforming cursor positions using Quill Delta `transformPosition(...)`.
+
+## 8. Why is cursor rendering handled outside React?
+
+React is great for UI, but remote cursor movement can happen very frequently.
+
+If every cursor update caused a React re-render, that could become expensive.
+
+So the project uses a custom `CursorManager` class that:
+
+- stores remote cursor state
+- manipulates DOM nodes directly
+- batches updates with `requestAnimationFrame`
+
+That is a good engineering choice for this kind of highly dynamic overlay.
+
+## 9. Why do we still autosave if events are real-time?
+
+Real-time sync and persistence are different problems.
+
+Real-time sync means:
+
+- other users see your changes immediately
+
+Persistence means:
+
+- the document still exists after refresh or reconnect
+
+That is why the app also sends `save-document` every 2 seconds and stores the content in MongoDB.
+
+## 10. Where these concepts live in this project
+
+- Socket setup: `frontend/src/TextEditor.js`
+- Cursor engine: `frontend/src/CursorManager.js`
+- Server room logic: `backend/websocket/socketHandler.js`
+- MongoDB persistence: `backend/services/documentService.js`
+
+## 11. Interview-ready explanation
+
+You can say:
+
+> I built the editor on top of Quill and Socket.io. Quill gives me delta-based edit operations, and Socket.io gives me persistent real-time communication with room-based broadcasting. I also added cursor tracking with delta-aware position updates so remote cursors stay visually aligned as users type.
+
+## 12. What to learn next
+
+After this document, read:
+
+- [Redis Scaling 101](./REDIS_SCALING_101.md)
+- [CRDT and Yjs 101](./CRDT_YJS_101.md)
