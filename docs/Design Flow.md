@@ -186,3 +186,49 @@ Learning docs for this phase:
 - [Architecture](./ARCHITECTURE.md)
 - [Local Dev Setup](./LOCAL_DEV_SETUP.md)
 - [System Design Interview Guide](./SYSTEM_DESIGN_INTERVIEW_GUIDE.md)
+
+## 2026-04-02 - Automated test harness
+Status: Implemented
+
+What changed:
+- Added backend automated tests for document-service rules such as timed checkpoints, retention, and restore backups.
+- Added backend socket integration tests for history fetch, history update broadcast, and live restore broadcast.
+- Extracted the version-history sidebar into its own frontend component and added focused UI tests for it.
+- Added repeatable test commands for backend and frontend so feature validation is no longer manual-only.
+
+Why it changed:
+- The project had reached the point where manual smoke testing alone was too slow and too easy to miss regressions.
+- A parallel test track makes future realtime and persistence changes safer to ship.
+
+Interview explanation:
+- I added an automated test harness around the highest-risk collaborative paths: persistence rules, room-scoped socket events, and the restore UI.
+- That let the project move from demo-style manual validation toward an engineering workflow where new features can ship with regression coverage.
+
+Learning docs for this phase:
+
+- [Local Dev Setup](./LOCAL_DEV_SETUP.md)
+- [Architecture](./ARCHITECTURE.md)
+- [System Design Interview Guide](./SYSTEM_DESIGN_INTERVIEW_GUIDE.md)
+
+## 2026-04-02 - Browser E2E automation
+Status: Implemented
+
+What changed:
+- Added Playwright-based browser smoke tests for true multi-client collaboration.
+- Added a root E2E runner that can boot MongoDB, backend and frontend processes, and then run the browser suite.
+- Added a single-node browser smoke flow across two isolated browser contexts.
+- Added a Redis-backed browser smoke flow across two frontends and two backends.
+- Added fast test-only interval overrides so browser automation does not wait the full production-style checkpoint window.
+
+Why it changed:
+- Unit and socket tests are useful, but they do not prove that the browser, editor, sockets, and restore flow all work together end to end.
+- The project needed at least one real browser automation path to back up the collaborative editing story.
+
+Interview explanation:
+- I added real browser E2E coverage on top of the unit and integration harness so the critical multi-client flows are tested at the user level, not just at the service and socket layers.
+- The Redis-backed flow uses the same local multi-instance topology as the manual runbook, which makes the distributed-system story more credible.
+
+Learning docs for this phase:
+
+- [Local Dev Setup](./LOCAL_DEV_SETUP.md)
+- [Architecture](./ARCHITECTURE.md)

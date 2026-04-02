@@ -229,6 +229,42 @@ In Redis-scaled mode, `localhost:3000` and `localhost:3003` already count as dif
 
 ## Testing
 
+### Automated test commands
+
+Run these before manual smoke testing:
+
+```bash
+cd backend
+npm test
+
+cd frontend
+npm run test:ci
+```
+
+Current automated coverage includes:
+
+- backend document-service rules for checkpoints, retention, and restore backups
+- backend socket integration for history fetch, history update broadcast, and live restore broadcast
+- frontend version-history sidebar rendering and restore-button behavior
+- Playwright single-node browser smoke across two isolated browser contexts
+- Playwright Redis-backed browser smoke across `localhost:3000` and `localhost:3003`
+
+### Browser E2E commands
+
+Run these from the repo root:
+
+```bash
+npm run e2e:single
+npm run e2e:redis
+npm run e2e
+```
+
+Notes:
+
+- `e2e:single` starts MongoDB if needed, then boots one backend and one frontend, and runs the Playwright multi-context collaboration smoke test
+- `e2e:redis` starts MongoDB if needed, expects Docker Desktop and the Docker engine to be running, ensures the `collab-redis` container is available, then boots two backends and two frontends before running the cross-backend Playwright smoke test
+- `e2e` runs the single-node suite first and then the Redis-backed suite
+
 ### Single-node checklist
 
 1. Start MongoDB, backend, and frontend.

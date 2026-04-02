@@ -8,7 +8,7 @@
     "devStart:3002": "cross-env SOCKET_PORT=3002 nodemon server.js",
     "devStart:redis": "cross-env REDIS_URL=redis://localhost:6379 nodemon server.js",
     "devStart:redis:3002": "cross-env SOCKET_PORT=3002 REDIS_URL=redis://localhost:6379 nodemon server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test --test-isolation=none --test-concurrency=1"
   },
   "keywords": [],
   "author": "",

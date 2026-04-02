@@ -352,6 +352,8 @@ You can honestly say:
 - you implemented remote cursor tracking with drift correction
 - you added Redis-based cross-instance Socket.io scaling
 - you added timed version history with live restore
+- you built an automated test harness for backend service logic, socket events, and the history sidebar
+- you added Playwright browser smoke tests for multi-client collaboration flows
 - you documented single-node and Redis-scaled local validation flows
 
 You should not yet say:

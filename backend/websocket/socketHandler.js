@@ -1,11 +1,6 @@
 const crypto = require("crypto")
 
-const {
-    loadHistory,
-    loadDocument,
-    persistDocument,
-    restoreVersion,
-} = require("../controllers/documentController")
+const documentController = require("../controllers/documentController")
 
 const DOCUMENT_SYNC_TIMEOUT_MS = 5000
 
@@ -102,7 +97,13 @@ function emitHistoryUpdate(io, documentId, history) {
     io.to(documentId).emit("document-history-updated", history)
 }
 
-function registerSocketHandlers(io) {
+function createSocketHandler({
+    loadDocument,
+    loadHistory,
+    persistDocument,
+    restoreVersion,
+} = documentController) {
+    return function registerSocketHandlers(io) {
     io.on("resolve-document-sync", (payload = {}) => {
         const update = normalizeBinaryUpdate(payload.update)
         if (!update) return
@@ -255,6 +256,10 @@ function registerSocketHandlers(io) {
             emitCursorRemoval(socket, socket.data.documentId)
         })
     })
+    }
 }
 
+const registerSocketHandlers = createSocketHandler()
+
 module.exports = registerSocketHandlers
+module.exports.createSocketHandler = createSocketHandler

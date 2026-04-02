@@ -100,6 +100,7 @@ Today you can confidently say:
 - You added Redis-based Socket.io scaling support for multi-instance real-time delivery
 - You migrated document content sync to Yjs-based CRDT updates
 - You added timed version history with live restore
+- You added an automated test harness for core backend and frontend collaboration flows
 
 Today you should not claim yet:
 

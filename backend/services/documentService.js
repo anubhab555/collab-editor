@@ -13,7 +13,7 @@ const VERSION_SOURCES = {
     RESTORE_BACKUP: "restore-backup",
 }
 const MAX_DOCUMENT_VERSIONS = 20
-const CHECKPOINT_INTERVAL_MS = 30000
+const CHECKPOINT_INTERVAL_MS = Number(process.env.CHECKPOINT_INTERVAL_MS) || 30000
 const DEFAULT_SAVED_BY = {
     clientId: "guest",
     displayName: "Guest",
@@ -129,7 +129,7 @@ function trimVersions(versions) {
 function createVersionEntry({ data, yjsState, savedBy, source }) {
     return {
         versionId: randomUUID(),
-        createdAt: new Date(),
+        createdAt: new Date(Date.now()),
         savedBy: normalizeSavedBy(savedBy),
         source,
         yjsState,
@@ -143,13 +143,13 @@ function prependVersion(document, versionEntry) {
 
 function shouldCreateCheckpoint(document, { data, yjsState }) {
     if (isDocumentBlank(data)) return false
-    if (getActiveYjsState(document) === yjsState) return false
 
     const latestCheckpoint = (document.versions || []).find(
         (version) => version.source === VERSION_SOURCES.CHECKPOINT
     )
 
     if (!latestCheckpoint) return true
+    if (latestCheckpoint.yjsState === yjsState) return false
 
     return Date.now() - new Date(latestCheckpoint.createdAt).getTime() >= CHECKPOINT_INTERVAL_MS
 }

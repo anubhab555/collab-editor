@@ -91,6 +91,24 @@ If you want to start with a clean local database:
 12. If you already have older documents saved before the Yjs migration, reopen one and verify it still loads, resaves, and starts accumulating history correctly.
 13. After Redis is running locally, use the multi-instance flow below to verify cross-backend sync.
 
+## Automated Testing
+Use the automated harness for fast feedback before running browser smoke tests:
+
+* Backend service + socket tests: `cd backend && npm test`
+* Frontend version-history panel tests: `cd frontend && npm run test:ci`
+* Combined unit/integration run from the repo root: `npm test`
+* Single-node browser E2E smoke: `npm run e2e:single`
+* Redis-backed browser E2E smoke: `npm run e2e:redis`
+
+Current automated coverage includes:
+
+* checkpoint creation and retention rules
+* restore-backup behavior
+* history fetch and room-wide restore socket events
+* version-history sidebar rendering and restore button behavior
+* real browser multi-context collaboration smoke in single-node mode
+* Redis-backed cross-backend browser smoke when Docker Desktop and the engine are running
+
 ## Redis Scaling
 * Set `REDIS_URL=redis://localhost:6379` to enable the Socket.io Redis adapter.
 * When `REDIS_URL` is not set, the backend stays in single-node mode.

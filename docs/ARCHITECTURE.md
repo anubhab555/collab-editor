@@ -41,12 +41,12 @@ If you want interview-focused HLD and LLD preparation, read [System Design Inter
 | Recovery | Timed checkpoints + live restore | Richer history, restore, and possibly diff or audit features |
 | Identity | Browser-local identity only | Authenticated users with document-level access control |
 | Deployment | Local scripts + Docker-managed Redis for testing | Dockerized full stack, then optional Kubernetes-ready deployment |
-| Observability and testing | Manual smoke tests plus build and syntax verification | Automated unit, integration, and multi-client end-to-end testing with production-style monitoring |
+| Observability and testing | Automated backend service/socket tests, frontend panel tests, and Playwright browser smoke tests, plus manual Redis verification when needed | Automated unit, integration, and multi-client end-to-end testing with production-style monitoring |
 
 The honest way to describe the gap is:
 
 - today, the collaboration engine and restore flow are real
-- the main missing pieces are unified presence, deployment packaging, authenticated access, and automated test depth
+- the main missing pieces are unified presence, deployment packaging, authenticated access, and deeper end-to-end test coverage
 - that means the project already demonstrates the core distributed editor design, but is not yet the final production-shaped platform
 
 ## Honest Architecture Summary
