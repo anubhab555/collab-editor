@@ -5,6 +5,7 @@ const documentController = require("../controllers/documentController")
 const DOCUMENT_SYNC_TIMEOUT_MS = 5000
 
 const pendingDocumentSyncs = new Map()
+const pendingAwarenessSyncs = new Map()
 
 function normalizeBinaryUpdate(update) {
     if (!update) return null
@@ -32,34 +33,53 @@ function normalizeBinaryUpdate(update) {
     return null
 }
 
-function clearPendingDocumentSync(requestId) {
+function normalizeAwarenessClientId(value) {
+    if (!Number.isFinite(value)) return null
+
+    return Number(value)
+}
+
+function normalizeAwarenessClientIds(values = []) {
+    const awarenessClientIds = new Set()
+
+    for (const value of values) {
+        const awarenessClientId = normalizeAwarenessClientId(value)
+        if (awarenessClientId == null) continue
+
+        awarenessClientIds.add(awarenessClientId)
+    }
+
+    return Array.from(awarenessClientIds)
+}
+
+function clearPendingSync(pendingSyncs, requestId) {
     if (!requestId) return
 
-    const pendingSync = pendingDocumentSyncs.get(requestId)
+    const pendingSync = pendingSyncs.get(requestId)
     if (!pendingSync) return
 
     clearTimeout(pendingSync.timeoutId)
-    pendingDocumentSyncs.delete(requestId)
+    pendingSyncs.delete(requestId)
 }
 
-function registerPendingDocumentSync(documentId, targetSocketId) {
+function registerPendingSync(pendingSyncs, documentId, targetSocketId) {
     const requestId = crypto.randomUUID()
     const timeoutId = setTimeout(() => {
-        pendingDocumentSyncs.delete(requestId)
+        pendingSyncs.delete(requestId)
     }, DOCUMENT_SYNC_TIMEOUT_MS)
 
-    pendingDocumentSyncs.set(requestId, {
+    pendingSyncs.set(requestId, {
         documentId,
-        targetSocketId,
         fulfilled: false,
+        targetSocketId,
         timeoutId,
     })
 
     return requestId
 }
 
-function fulfillPendingDocumentSync(io, { requestId, documentId, targetSocketId, update }) {
-    const pendingSync = pendingDocumentSyncs.get(requestId)
+function fulfillPendingSync(pendingSyncs, io, eventName, { requestId, documentId, targetSocketId, payload }) {
+    const pendingSync = pendingSyncs.get(requestId)
     if (!pendingSync) return false
     if (pendingSync.fulfilled) return false
     if (pendingSync.documentId !== documentId || pendingSync.targetSocketId !== targetSocketId) {
@@ -67,21 +87,23 @@ function fulfillPendingDocumentSync(io, { requestId, documentId, targetSocketId,
     }
 
     pendingSync.fulfilled = true
-    clearPendingDocumentSync(requestId)
+    clearPendingSync(pendingSyncs, requestId)
 
-    io.to(targetSocketId).emit("document-sync", {
+    io.to(targetSocketId).emit(eventName, {
         documentId,
-        update,
+        ...payload,
     })
 
     return true
 }
 
-function emitCursorRemoval(socket, documentId) {
-    if (!documentId || !socket.data.user?.clientId) return
+function emitAwarenessRemoval(emitter, documentId, awarenessClientIds) {
+    const normalizedClientIds = normalizeAwarenessClientIds(awarenessClientIds)
+    if (!documentId || normalizedClientIds.length === 0) return
 
-    socket.to(documentId).emit("cursor-remove", {
-        clientId: socket.data.user.clientId,
+    emitter.to(documentId).emit("awareness-remove", {
+        awarenessClientIds: normalizedClientIds,
+        documentId,
     })
 }
 
@@ -104,158 +126,254 @@ function createSocketHandler({
     restoreVersion,
 } = documentController) {
     return function registerSocketHandlers(io) {
-    io.on("resolve-document-sync", (payload = {}) => {
-        const update = normalizeBinaryUpdate(payload.update)
-        if (!update) return
+        io.on("resolve-document-sync", (payload = {}) => {
+            const update = normalizeBinaryUpdate(payload.update)
+            if (!update) return
 
-        fulfillPendingDocumentSync(io, {
-            requestId: payload.requestId,
-            documentId: payload.documentId,
-            targetSocketId: payload.targetSocketId,
-            update,
+            fulfillPendingSync(pendingDocumentSyncs, io, "document-sync", {
+                documentId: payload.documentId,
+                payload: { update },
+                requestId: payload.requestId,
+                targetSocketId: payload.targetSocketId,
+            })
         })
-    })
 
-    io.on("connection", (socket) => {
-        socket.on("get-document", async (documentId) => {
-            const document = await loadDocument(documentId)
-            if (!document) return
+        io.on("resolve-awareness-sync", (payload = {}) => {
+            const update = normalizeBinaryUpdate(payload.update)
+            if (!update) return
 
-            const previousDocumentId = socket.data.documentId
+            fulfillPendingSync(pendingAwarenessSyncs, io, "awareness-update", {
+                documentId: payload.documentId,
+                payload: { update },
+                requestId: payload.requestId,
+                targetSocketId: payload.targetSocketId,
+            })
+        })
 
-            if (previousDocumentId) {
-                emitCursorRemoval(socket, previousDocumentId)
-                socket.leave(previousDocumentId)
-            }
+        io.on("connection", (socket) => {
+            socket.on("get-document", async (documentId) => {
+                const document = await loadDocument(documentId)
+                if (!document) return
 
-            clearPendingDocumentSync(socket.data.pendingDocumentSyncRequestId)
-            socket.data.pendingDocumentSyncRequestId = null
-            socket.data.documentId = documentId
-            socket.join(documentId)
-            socket.emit("load-document", document)
+                const previousDocumentId = socket.data.documentId
+                const previousAwarenessClientId = socket.data.awarenessClientId
 
-            const roomSockets = await io.in(documentId).allSockets()
+                if (previousDocumentId) {
+                    emitAwarenessRemoval(socket, previousDocumentId, [previousAwarenessClientId])
+                    socket.leave(previousDocumentId)
+                }
 
-            if (roomSockets.size > 1) {
-                const requestId = registerPendingDocumentSync(documentId, socket.id)
-                socket.data.pendingDocumentSyncRequestId = requestId
+                clearPendingSync(pendingDocumentSyncs, socket.data.pendingDocumentSyncRequestId)
+                clearPendingSync(pendingAwarenessSyncs, socket.data.pendingAwarenessSyncRequestId)
+                socket.data.pendingDocumentSyncRequestId = null
+                socket.data.pendingAwarenessSyncRequestId = null
+                socket.data.documentId = documentId
+                socket.data.awarenessClientId = null
+                socket.join(documentId)
+                socket.emit("load-document", document)
 
-                socket.to(documentId).emit("request-document-sync", {
+                const roomSockets = await io.in(documentId).allSockets()
+
+                if (roomSockets.size > 1) {
+                    const requestId = registerPendingSync(
+                        pendingDocumentSyncs,
+                        documentId,
+                        socket.id
+                    )
+
+                    socket.data.pendingDocumentSyncRequestId = requestId
+                    socket.to(documentId).emit("request-document-sync", {
+                        documentId,
+                        requestId,
+                        targetSocketId: socket.id,
+                    })
+                }
+            })
+
+            socket.on("join-document", async ({ documentId, user } = {}) => {
+                if (!documentId || socket.data.documentId !== documentId || !user?.clientId) {
+                    return
+                }
+
+                socket.data.user = {
+                    clientId: user.clientId,
+                    color: user.color,
+                    displayName: user.displayName,
+                }
+
+                clearPendingSync(pendingAwarenessSyncs, socket.data.pendingAwarenessSyncRequestId)
+                socket.data.pendingAwarenessSyncRequestId = null
+
+                const roomSockets = await io.in(documentId).allSockets()
+                if (roomSockets.size <= 1) return
+
+                const requestId = registerPendingSync(
+                    pendingAwarenessSyncs,
+                    documentId,
+                    socket.id
+                )
+
+                socket.data.pendingAwarenessSyncRequestId = requestId
+                socket.to(documentId).emit("request-awareness-sync", {
                     documentId,
                     requestId,
                     targetSocketId: socket.id,
                 })
-            }
-        })
-
-        socket.on("join-document", ({ documentId, user } = {}) => {
-            if (!documentId || socket.data.documentId !== documentId || !user?.clientId) {
-                return
-            }
-
-            socket.data.user = {
-                clientId: user.clientId,
-                displayName: user.displayName,
-                color: user.color,
-            }
-        })
-
-        socket.on("get-document-history", async ({ documentId } = {}) => {
-            if (!documentId || socket.data.documentId !== documentId) return
-
-            const history = await loadHistory(documentId)
-            emitHistory(socket, history)
-        })
-
-        socket.on("yjs-update", ({ update } = {}) => {
-            const { documentId } = socket.data
-            if (!documentId) return
-
-            const normalizedUpdate = normalizeBinaryUpdate(update)
-            if (!normalizedUpdate) return
-
-            socket.to(documentId).emit("yjs-update", {
-                documentId,
-                update: normalizedUpdate,
-            })
-        })
-
-        socket.on("document-sync", ({ documentId, requestId, targetSocketId, update } = {}) => {
-            if (!documentId || socket.data.documentId !== documentId || !requestId || !targetSocketId) {
-                return
-            }
-
-            const normalizedUpdate = normalizeBinaryUpdate(update)
-            if (!normalizedUpdate) return
-
-            const fulfilledLocally = fulfillPendingDocumentSync(io, {
-                requestId,
-                documentId,
-                targetSocketId,
-                update: normalizedUpdate,
             })
 
-            if (!fulfilledLocally) {
-                io.serverSideEmit("resolve-document-sync", {
-                    requestId,
+            socket.on("get-document-history", async ({ documentId } = {}) => {
+                if (!documentId || socket.data.documentId !== documentId) return
+
+                const history = await loadHistory(documentId)
+                emitHistory(socket, history)
+            })
+
+            socket.on("yjs-update", ({ update } = {}) => {
+                const { documentId } = socket.data
+                if (!documentId) return
+
+                const normalizedUpdate = normalizeBinaryUpdate(update)
+                if (!normalizedUpdate) return
+
+                socket.to(documentId).emit("yjs-update", {
                     documentId,
-                    targetSocketId,
                     update: normalizedUpdate,
                 })
-            }
-        })
-
-        socket.on("cursor-move", ({ range } = {}) => {
-            const { documentId, user } = socket.data
-            if (!documentId || !user?.clientId) return
-
-            socket.to(documentId).emit("cursor-update", {
-                user,
-                range,
-            })
-        })
-
-        socket.on("save-document", async (payload = {}) => {
-            const { documentId } = socket.data
-            if (!documentId) return
-
-            const result = await persistDocument(documentId, {
-                payload: {
-                    data: payload.data,
-                    yjsStateBase64: payload.yjsStateBase64,
-                },
-                savedBy: socket.data.user,
             })
 
-            if (result?.historyUpdated) {
+            socket.on("document-sync", ({ documentId, requestId, targetSocketId, update } = {}) => {
+                if (!documentId || socket.data.documentId !== documentId || !requestId || !targetSocketId) {
+                    return
+                }
+
+                const normalizedUpdate = normalizeBinaryUpdate(update)
+                if (!normalizedUpdate) return
+
+                const fulfilledLocally = fulfillPendingSync(
+                    pendingDocumentSyncs,
+                    io,
+                    "document-sync",
+                    {
+                        documentId,
+                        payload: { update: normalizedUpdate },
+                        requestId,
+                        targetSocketId,
+                    }
+                )
+
+                if (!fulfilledLocally) {
+                    io.serverSideEmit("resolve-document-sync", {
+                        documentId,
+                        requestId,
+                        targetSocketId,
+                        update: normalizedUpdate,
+                    })
+                }
+            })
+
+            socket.on("awareness-update", ({ documentId, awarenessClientId, update } = {}) => {
+                if (!documentId || socket.data.documentId !== documentId) return
+
+                const normalizedUpdate = normalizeBinaryUpdate(update)
+                if (!normalizedUpdate) return
+
+                const normalizedAwarenessClientId = normalizeAwarenessClientId(awarenessClientId)
+                if (normalizedAwarenessClientId != null) {
+                    socket.data.awarenessClientId = normalizedAwarenessClientId
+                }
+
+                socket.to(documentId).emit("awareness-update", {
+                    documentId,
+                    update: normalizedUpdate,
+                })
+            })
+
+            socket.on("awareness-sync", ({ documentId, requestId, targetSocketId, update } = {}) => {
+                if (!documentId || socket.data.documentId !== documentId || !requestId || !targetSocketId) {
+                    return
+                }
+
+                const normalizedUpdate = normalizeBinaryUpdate(update)
+                if (!normalizedUpdate) return
+
+                const fulfilledLocally = fulfillPendingSync(
+                    pendingAwarenessSyncs,
+                    io,
+                    "awareness-update",
+                    {
+                        documentId,
+                        payload: { update: normalizedUpdate },
+                        requestId,
+                        targetSocketId,
+                    }
+                )
+
+                if (!fulfilledLocally) {
+                    io.serverSideEmit("resolve-awareness-sync", {
+                        documentId,
+                        requestId,
+                        targetSocketId,
+                        update: normalizedUpdate,
+                    })
+                }
+            })
+
+            socket.on("awareness-leave", ({ documentId } = {}) => {
+                if (!documentId || socket.data.documentId !== documentId) return
+
+                const ownAwarenessClientId = socket.data.awarenessClientId
+                const normalizedClientIds = normalizeAwarenessClientIds(
+                    ownAwarenessClientId ? [ownAwarenessClientId] : []
+                )
+                if (normalizedClientIds.length === 0) return
+
+                socket.data.awarenessClientId = null
+
+                emitAwarenessRemoval(socket, documentId, normalizedClientIds)
+            })
+
+            socket.on("save-document", async (payload = {}) => {
+                const { documentId } = socket.data
+                if (!documentId) return
+
+                const result = await persistDocument(documentId, {
+                    payload: {
+                        data: payload.data,
+                        yjsStateBase64: payload.yjsStateBase64,
+                    },
+                    savedBy: socket.data.user,
+                })
+
+                if (result?.historyUpdated) {
+                    emitHistoryUpdate(io, documentId, result.history)
+                }
+            })
+
+            socket.on("restore-version", async ({ documentId, versionId } = {}) => {
+                if (!documentId || socket.data.documentId !== documentId || !versionId) return
+
+                const result = await restoreVersion(documentId, {
+                    versionId,
+                    savedBy: socket.data.user,
+                })
+
+                if (!result) return
+
                 emitHistoryUpdate(io, documentId, result.history)
-            }
-        })
-
-        socket.on("restore-version", async ({ documentId, versionId } = {}) => {
-            if (!documentId || socket.data.documentId !== documentId || !versionId) return
-
-            const result = await restoreVersion(documentId, {
-                versionId,
-                savedBy: socket.data.user,
+                io.to(documentId).emit("document-restored", {
+                    documentId,
+                    restoredBy: result.restoredBy,
+                    versionId: result.restoredVersionId,
+                    yjsStateBase64: result.document.yjsStateBase64,
+                })
             })
 
-            if (!result) return
-
-            emitHistoryUpdate(io, documentId, result.history)
-            io.to(documentId).emit("document-restored", {
-                documentId,
-                versionId: result.restoredVersionId,
-                restoredBy: result.restoredBy,
-                yjsStateBase64: result.document.yjsStateBase64,
+            socket.on("disconnect", () => {
+                clearPendingSync(pendingDocumentSyncs, socket.data.pendingDocumentSyncRequestId)
+                clearPendingSync(pendingAwarenessSyncs, socket.data.pendingAwarenessSyncRequestId)
+                emitAwarenessRemoval(socket, socket.data.documentId, [socket.data.awarenessClientId])
             })
         })
-
-        socket.on("disconnect", () => {
-            clearPendingDocumentSync(socket.data.pendingDocumentSyncRequestId)
-            emitCursorRemoval(socket, socket.data.documentId)
-        })
-    })
     }
 }
 

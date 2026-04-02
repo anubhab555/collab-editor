@@ -37,11 +37,12 @@ export default class CursorManager {
         this.quill.root.addEventListener("scroll", this.handleEditorScroll)
     }
 
-    upsertCursor(user, range) {
-        if (!user?.clientId || this.isDestroyed) return
+    upsertCursor(cursorId, user, range) {
+        if (!cursorId || !user?.clientId || this.isDestroyed) return
 
+        const normalizedCursorId = String(cursorId)
         const normalizedRange = this.normalizeRange(range)
-        const existingCursor = this.cursors.get(user.clientId)
+        const existingCursor = this.cursors.get(normalizedCursorId)
 
         if (existingCursor) {
             existingCursor.user = user
@@ -49,24 +50,46 @@ export default class CursorManager {
             this.updateMarker(existingCursor.markerEl, user)
         } else {
             const markerEl = this.createMarker(user)
-            this.cursors.set(user.clientId, {
+            this.cursors.set(normalizedCursorId, {
                 user,
                 range: normalizedRange,
                 markerEl,
             })
+            markerEl.dataset.cursorId = normalizedCursorId
         }
 
         this.scheduleRender()
     }
 
-    removeCursor(clientId) {
-        if (!clientId) return
+    syncCursors(nextCursors) {
+        if (this.isDestroyed) return
 
-        const existingCursor = this.cursors.get(clientId)
+        const activeCursorIds = new Set()
+
+        for (const cursor of nextCursors) {
+            if (!cursor?.cursorId || !cursor?.user?.clientId) continue
+
+            const normalizedCursorId = String(cursor.cursorId)
+            activeCursorIds.add(normalizedCursorId)
+            this.upsertCursor(normalizedCursorId, cursor.user, cursor.range)
+        }
+
+        for (const cursorId of Array.from(this.cursors.keys())) {
+            if (!activeCursorIds.has(cursorId)) {
+                this.removeCursor(cursorId)
+            }
+        }
+    }
+
+    removeCursor(cursorId) {
+        if (!cursorId) return
+
+        const normalizedCursorId = String(cursorId)
+        const existingCursor = this.cursors.get(normalizedCursorId)
         if (!existingCursor) return
 
         existingCursor.markerEl.remove()
-        this.cursors.delete(clientId)
+        this.cursors.delete(normalizedCursorId)
     }
 
     clearAll() {
@@ -145,7 +168,6 @@ export default class CursorManager {
         const labelEl = document.createElement("div")
 
         markerEl.className = "remote-cursor"
-        markerEl.dataset.clientId = user.clientId
         caretEl.className = "remote-cursor__caret"
         labelEl.className = "remote-cursor__label"
 
@@ -172,7 +194,7 @@ export default class CursorManager {
         const activeCursorIds = new Set(this.cursors.keys())
 
         for (const child of Array.from(this.overlayEl.children)) {
-            if (!activeCursorIds.has(child.dataset.clientId)) {
+            if (!activeCursorIds.has(child.dataset.cursorId)) {
                 child.remove()
             }
         }

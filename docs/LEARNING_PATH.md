@@ -95,7 +95,7 @@ If you only have 20 to 30 minutes before an interview, read in this order:
 Today you can confidently say:
 
 - You built a real-time collaborative editor with React, Quill, Socket.io, and MongoDB
-- You added remote cursor tracking with drift correction
+- You added awareness-based presence and remote cursor tracking with drift correction
 - You modularized the backend
 - You added Redis-based Socket.io scaling support for multi-instance real-time delivery
 - You migrated document content sync to Yjs-based CRDT updates
@@ -104,9 +104,9 @@ Today you can confidently say:
 
 Today you should not claim yet:
 
-- full Yjs-awareness-based collaboration
 - Dockerized deployment
 - Kubernetes deployment
+- authenticated document access control
 
 Those are still future upgrades.
 

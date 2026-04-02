@@ -42,7 +42,7 @@ Socket.io is a library built on top of the WebSocket idea.
 
 It gives helpful features like:
 
-- named events such as `yjs-update` or `cursor-update`
+- named events such as `yjs-update` or `awareness-update`
 - rooms, so one document's users do not receive another document's events
 - reconnect behavior
 - a simpler developer experience
@@ -62,7 +62,7 @@ In this project:
 That means:
 
 - document A users do not receive document B events
-- the server can scope edit and cursor events correctly
+- the server can scope edit and awareness events correctly
 
 ## 5. What is a Quill Delta?
 
@@ -93,15 +93,15 @@ This is the honest interview answer:
 
 - document content is now CRDT-based through Yjs
 - Socket.io is still the transport layer
-- cursor and presence state are still handled separately through custom socket events
-- cursor positions still use transform logic because presence is not yet moved to Yjs awareness
+- presence state is now carried by Yjs awareness over that transport
+- cursor positions still use transform logic in the renderer because visual cursor placement is still a local UI problem
 
-So the current system is not "fully Yjs for everything."
-It is a hybrid design:
+So the current system is more unified than before:
 
 - Yjs for content correctness
-- Socket.io room events for transport
-- custom cursor logic for live presence
+- Yjs awareness for ephemeral collaborator state
+- Socket.io room events for transport and scaling
+- a custom cursor renderer for efficient DOM updates
 
 ## 7. Why do cursors drift?
 
@@ -157,7 +157,7 @@ That is why the app also sends `save-document` every 2 seconds and stores a Yjs 
 
 You can say:
 
-> I built the editor on top of React, Quill, Socket.io, and Yjs. Quill provides the editing UI, Yjs provides CRDT-based content convergence, Socket.io handles room-based realtime transport, and a custom cursor layer keeps remote carets live with delta-aware position updates.
+> I built the editor on top of React, Quill, Socket.io, and Yjs. Quill provides the editing UI, Yjs provides CRDT-based content convergence, Yjs awareness carries ephemeral collaborator state like names and cursors, Socket.io handles room-based realtime transport, and a dedicated cursor renderer keeps remote carets visually aligned with delta-aware position updates.
 
 ## 12. What to learn next
 

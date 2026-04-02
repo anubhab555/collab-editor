@@ -31,7 +31,7 @@ async function replaceEditorText(page, text) {
     await editor.click()
     await page.keyboard.press("Control+A")
     await page.keyboard.press("Backspace")
-    await page.keyboard.type(text)
+    await page.keyboard.insertText(text)
 }
 
 async function waitForHistoryCount(page, count) {
@@ -44,10 +44,21 @@ async function waitForHistoryCount(page, count) {
         .toBe(count)
 }
 
+async function waitForPresenceCount(page, count) {
+    const items = page.locator("[data-testid^=\"presence-item-\"]")
+
+    await expect
+        .poll(async () => items.count(), {
+            timeout: 10000,
+        })
+        .toBe(count)
+}
+
 module.exports = {
     openDocument,
     replaceEditorText,
     seedCollaborator,
     uniqueDocumentId,
     waitForHistoryCount,
+    waitForPresenceCount,
 }

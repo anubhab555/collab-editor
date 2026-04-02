@@ -14,11 +14,7 @@ That means:
 - Redis is still the scaling layer for multi-instance delivery
 - MongoDB stores a persisted Yjs snapshot plus a Quill delta mirror
 - timed version checkpoints now sit on top of that persisted state
-
-Important limitation:
-
-- cursor and presence state are still handled by the custom socket-based cursor system
-- this phase did not move presence to Yjs awareness yet
+- Yjs awareness now carries ephemeral user and cursor state
 
 ## 2. What is a CRDT?
 
@@ -112,9 +108,9 @@ High level:
 
 The current cursor work is still relevant because:
 
-- it handles realtime lifecycle cleanup already
-- it keeps presence separate from persisted document content
-- it is a reasonable bridge until Yjs awareness is introduced
+- `CursorManager` still owns the DOM-heavy marker rendering path
+- presence still stays separate from persisted document content
+- cursor drift correction is still useful even when awareness is the shared presence model
 
 ## 8. OT vs CRDT in simple words
 
@@ -127,7 +123,7 @@ Very simple comparison:
 
 You can now say:
 
-> The current editor uses Yjs for CRDT-based content sync, but cursor and presence handling are still on a custom realtime layer rather than Yjs awareness.
+> The current editor uses Yjs for CRDT-based content sync and Yjs awareness for ephemeral collaborator state like names and cursors.
 
 That is a strong and honest answer.
 
@@ -147,14 +143,14 @@ That matters because it shows you understand that sending events is not the same
 
 You can say:
 
-> The current editor uses Yjs for CRDT-based content sync over our existing Socket.io transport. That means content convergence is handled by the shared data model, while cursor presence is still managed separately through custom socket events. Redis still scales the transport layer across backend instances.
+> The current editor uses Yjs for CRDT-based content sync over our existing Socket.io transport, and it now uses Yjs awareness for ephemeral collaborator presence and cursor state. Redis still scales the transport layer across backend instances, while MongoDB persists only the document state and restoreable history.
 
 ## 11. What is still left after this phase
 
 The next meaningful upgrades are:
 
-- Yjs awareness for presence and cursors
 - Dockerized deployment
+- authenticated user identity and document-level access control
 
 ## 12. What to read next
 

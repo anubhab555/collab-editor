@@ -18,14 +18,15 @@ Today, this project is best described as:
 - a layered real-time collaborative editor
 - using Socket.io for event-driven communication
 - using Yjs for CRDT-based content sync
+- using Yjs awareness for ephemeral presence and cursor state
 - using MongoDB for persistence
 - using Redis pub/sub for horizontal scaling of Socket.io events
 - using timed version history with live restore
-- using a custom cursor layer with drift correction
+- using a dedicated cursor manager with drift correction on top of awareness state
 
 Today, it is not yet:
 
-- a full Yjs-awareness-based collaboration system
+- an authenticated collaboration system
 - a production container orchestration setup
 
 That honesty helps a lot in interviews.
@@ -67,9 +68,11 @@ The realtime system is built around socket events such as:
 - `restore-version`
 - `document-restored`
 - `join-document`
-- `cursor-move`
-- `cursor-update`
-- `cursor-remove`
+- `awareness-update`
+- `request-awareness-sync`
+- `awareness-sync`
+- `awareness-remove`
+- `awareness-leave`
 
 Why this matters:
 
@@ -127,7 +130,7 @@ Each document uses a Socket.io room keyed by `documentId`.
 
 Why this matters:
 
-- only users in the same document receive the same content and cursor events
+- only users in the same document receive the same content and awareness events
 - different documents remain isolated without needing separate servers
 
 What to say:
@@ -146,7 +149,7 @@ At high level, explain the system in 5 blocks:
 
 Short version:
 
-> The client is a React and Quill editor with a small history sidebar. Quill is bound to a Yjs shared document for content sync. The client talks to a Node.js Socket.io backend. Each document maps to a Socket.io room. MongoDB stores the active Yjs snapshot plus timed checkpoints for restore. When Redis is enabled, Socket.io uses Redis pub/sub so multiple backend instances can share realtime events. Cursor presence is still handled by a custom socket layer.
+> The client is a React and Quill editor with a small presence-plus-history sidebar. Quill is bound to a Yjs shared document for content sync, and a Yjs awareness instance carries ephemeral collaborator state like name and cursor position. The client talks to a Node.js Socket.io backend. Each document maps to a Socket.io room. MongoDB stores the active Yjs snapshot plus timed checkpoints for restore. When Redis is enabled, Socket.io uses Redis pub/sub so multiple backend instances can share realtime content and awareness events.
 
 ### HLD questions an interviewer may ask
 
@@ -169,6 +172,7 @@ Expected answer:
 - frontend emits a Yjs update
 - backend broadcasts the update to the document room
 - other clients apply the Yjs update
+- local awareness state separately tracks user metadata and cursor position
 - the document is autosaved periodically to MongoDB
 - timed checkpoints provide restoreable history on top of the live state
 
@@ -184,14 +188,14 @@ Expected answer:
 Expected answer:
 
 - Yjs solves shared-state convergence
-- Socket.io still handles transport, rooms, reconnection behavior, and the current cursor flow
+- Socket.io still handles transport, rooms, reconnection behavior, and awareness transport
 - this let the project keep its scaling story while upgrading the content model underneath it
 
 #### What are the current limitations?
 
 Expected answer:
 
-- content sync is CRDT-based, but presence is not yet moved to Yjs awareness
+- identity is still browser-local instead of authenticated
 - deployment automation is still limited compared with a full production platform
 
 #### How would you scale this further?
@@ -199,8 +203,8 @@ Expected answer:
 Expected answer:
 
 - keep Redis for transport scaling
-- move presence and cursors toward Yjs awareness
 - containerize services
+- add authenticated user identity and access control
 - later add orchestrated deployment and observability
 
 ## LLD: How To Explain The System
@@ -241,24 +245,25 @@ Expected answer:
 Expected answer:
 
 - each socket stores an active `documentId`
-- content and cursor events are emitted to that document room only
+- content and awareness events are emitted to that document room only
 - switching documents leaves the old room and joins the new one
 
 #### How are cursors implemented?
 
 Expected answer:
 
-- client emits throttled `cursor-move`
-- backend forwards `cursor-update` to the same room except the sender
-- frontend stores remote cursor state in `CursorManager`
-- `CursorManager` renders DOM markers and cleans them up on disconnect, blur, or document switch
+- client updates local Yjs awareness state with `{ user, cursor }`
+- frontend emits throttled `awareness-update` messages over Socket.io
+- backend forwards awareness updates to the same room except the sender
+- frontend derives the active-collaborators roster from awareness state and stores remote cursor render state in `CursorManager`
+- `CursorManager` renders DOM markers and cleans them up when awareness state is removed or the session changes
 
 #### How do you reduce cursor drift?
 
 Expected answer:
 
 - when text changes arrive, remote cursor positions are transformed using Quill Delta position transforms
-- this keeps cursors closer to the correct position even though presence is not yet awareness-based
+- this keeps cursors visually aligned while awareness updates continue to arrive asynchronously
 
 #### Why not re-render cursors with React state on every update?
 
@@ -315,6 +320,7 @@ These are the most likely interview questions for this project.
 - How do you catch up a newly joined client to the latest state?
 - How do you avoid cursor flicker or drift?
 - How do you clean up stale cursors?
+- How do you sync presence for a newly joined collaborator?
 - How do you create and cap version history?
 - What happens to connected collaborators when one user restores a version?
 - How is collaborator identity handled today?
@@ -333,11 +339,10 @@ Interviewers like hearing tradeoffs, not just features.
 - periodic autosave instead of write-on-every-keystroke
 - timed checkpoints instead of versioning every autosave tick
 - Redis adapter only when scaling is needed
-- custom cursor manager for performance-sensitive rendering
+- custom cursor manager for performance-sensitive rendering on top of awareness state
 
 ### Current acknowledged limitations
 
-- cursor presence is still custom and not yet awareness-based
 - identity is browser-storage-based, not authenticated user identity
 - no auth or authorization yet
 - no production observability stack yet
@@ -349,7 +354,7 @@ You can honestly say:
 - you built a real-time collaborative editor
 - you modularized the backend into layered responsibilities
 - you migrated content sync to Yjs-based CRDT updates
-- you implemented remote cursor tracking with drift correction
+- you implemented Yjs awareness-based presence and remote cursor tracking with drift correction
 - you added Redis-based cross-instance Socket.io scaling
 - you added timed version history with live restore
 - you built an automated test harness for backend service logic, socket events, and the history sidebar
@@ -358,7 +363,6 @@ You can honestly say:
 
 You should not yet say:
 
-- the system uses Yjs awareness for full presence and cursor sync
 - the system has production-grade auth and authorization
 - the system has production-grade deployment orchestration
 
@@ -366,12 +370,12 @@ You should not yet say:
 
 ### If asked for the HLD in 30 seconds
 
-> The system has a React and Quill frontend, a Node.js Socket.io realtime backend, Yjs as the shared content model, MongoDB for persistence, and optional Redis pub/sub for horizontal scaling. Each document maps to a socket room, so content updates and cursor updates stay isolated by document ID.
+> The system has a React and Quill frontend, a Node.js Socket.io realtime backend, Yjs as the shared content and awareness model, MongoDB for persistence, and optional Redis pub/sub for horizontal scaling. Each document maps to a socket room, so content updates and awareness updates stay isolated by document ID.
 
 ### If asked for the LLD in 30 seconds
 
-> At low level, the client loads a persisted Yjs baseline by document ID, binds Quill to a local Yjs document, emits Yjs updates for content, and emits throttled cursor updates for presence. The backend broadcasts room-scoped events, stores autosaved Yjs state plus timed history checkpoints in MongoDB, and when Redis is enabled those events are propagated across backend instances.
+> At low level, the client loads a persisted Yjs baseline by document ID, binds Quill to a local Yjs document, attaches a Yjs awareness instance for `{ user, cursor }`, emits Yjs updates for content, and emits throttled awareness updates for presence. The backend broadcasts room-scoped events, stores autosaved Yjs state plus timed history checkpoints in MongoDB, and when Redis is enabled those events are propagated across backend instances.
 
 ### If asked what the next serious engineering step is
 
-> The next major steps are moving presence or cursors toward Yjs awareness and packaging the full stack for production-style deployment, now that content sync and restoreable history are already in place.
+> The next major steps are packaging the full stack for production-style deployment and replacing browser-local identity with authenticated users and document-level access control, now that content sync, presence, and restoreable history are already in place.
