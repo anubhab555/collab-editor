@@ -110,6 +110,43 @@ test("saveDocument creates timed checkpoints only when content changes", async (
     assert.equal(Object.hasOwn(history.versions[0], "data"), false)
 })
 
+test("saveDocument skips checkpoints for blank content", async (context) => {
+    const store = new Map()
+    const originalFindById = Document.findById
+    const originalCreate = Document.create
+
+    Document.findById = async (id) => store.get(id) || null
+    Document.create = async (payload) => {
+        const document = createFakeDocument(store, payload)
+        store.set(document._id, document)
+        return document
+    }
+
+    context.after(() => {
+        Document.findById = originalFindById
+        Document.create = originalCreate
+    })
+
+    const blankResult = await saveDocument(
+        "doc-blank",
+        {
+            data: { ops: [{ insert: "\n" }] },
+            yjsStateBase64: "blank-state",
+        },
+        {
+            clientId: "user-blank",
+            displayName: "Blank Editor",
+        }
+    )
+
+    assert.equal(blankResult.historyUpdated, false)
+    assert.equal(blankResult.history.versions.length, 0)
+
+    const storedDocument = store.get("doc-blank")
+    assert.equal(storedDocument.yjsState, "blank-state")
+    assert.deepEqual(storedDocument.data, { ops: [{ insert: "\n" }] })
+})
+
 test("saveDocument creates a later checkpoint after the interval even if the active state was already autosaved", async (context) => {
     const store = new Map()
     const originalFindById = Document.findById
@@ -289,4 +326,58 @@ test("restoreDocumentVersion saves a restore backup before switching active stat
     assert.equal(restoredDocument.versions[0].source, VERSION_SOURCES.RESTORE_BACKUP)
     assert.equal(restoredDocument.versions[0].yjsState, "state-2")
     assert.equal(restoredDocument.versions[0].savedBy.displayName, "Restorer")
+})
+
+test("restoreDocumentVersion skips creating a backup when the active state already matches the target", async (context) => {
+    const store = new Map()
+    const originalFindById = Document.findById
+    const originalCreate = Document.create
+
+    Document.findById = async (id) => store.get(id) || null
+    Document.create = async (payload) => {
+        const document = createFakeDocument(store, payload)
+        store.set(document._id, document)
+        return document
+    }
+
+    context.after(() => {
+        Document.findById = originalFindById
+        Document.create = originalCreate
+    })
+
+    store.set("doc-no-backup", createFakeDocument(store, {
+        _id: "doc-no-backup",
+        data: { ops: [{ insert: "Current text\n" }] },
+        yjsState: "same-state",
+        contentFormat: "yjs",
+        versions: [
+            {
+                versionId: "version-same",
+                createdAt: "2026-04-02T12:00:00.000Z",
+                savedBy: {
+                    clientId: "user-1",
+                    displayName: "Original Author",
+                },
+                source: VERSION_SOURCES.CHECKPOINT,
+                yjsState: "same-state",
+                data: { ops: [{ insert: "Current text\n" }] },
+            },
+        ],
+    }))
+
+    const restoreResult = await restoreDocumentVersion(
+        "doc-no-backup",
+        "version-same",
+        {
+            clientId: "user-2",
+            displayName: "Restorer",
+        }
+    )
+
+    const restoredDocument = store.get("doc-no-backup")
+
+    assert.equal(restoreResult.restoredVersionId, "version-same")
+    assert.equal(restoredDocument.yjsState, "same-state")
+    assert.equal(restoredDocument.versions.length, 1)
+    assert.equal(restoredDocument.versions[0].source, VERSION_SOURCES.CHECKPOINT)
 })
