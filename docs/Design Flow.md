@@ -15,6 +15,7 @@ Use these docs when you want to study the concepts, not just the change log:
 - [Architecture](./ARCHITECTURE.md)
 - [Local Dev Setup](./LOCAL_DEV_SETUP.md)
 - [Learning Path](./LEARNING_PATH.md)
+- [System Design Interview Guide](./SYSTEM_DESIGN_INTERVIEW_GUIDE.md)
 - [Realtime Collaboration 101](./REALTIME_COLLABORATION_101.md)
 - [Redis Scaling 101](./REDIS_SCALING_101.md)
 - [CRDT and Yjs 101](./CRDT_YJS_101.md)
@@ -108,6 +109,7 @@ Status: Implemented
 What changed:
 - Added beginner-friendly concept docs under `docs/` for realtime collaboration, Redis scaling, CRDT/Yjs, and Docker/Kubernetes.
 - Added a learning path doc so the project can be studied in a structured order before interviews.
+- Added a focused system design interview guide for HLD and LLD preparation.
 - Updated the architecture doc so it reflects the current Redis-enabled system honestly and clearly.
 
 Why it changed:
@@ -137,3 +139,26 @@ Learning docs for this phase:
 
 - [Local Dev Setup](./LOCAL_DEV_SETUP.md)
 - [Architecture](./ARCHITECTURE.md)
+
+## 2026-03-21 - Yjs CRDT content sync
+Status: Implemented
+
+What changed:
+- Replaced content sync based on raw Quill delta broadcast with Yjs-based CRDT updates.
+- Kept the existing Socket.io and Redis architecture as the transport layer.
+- Added backward-compatible MongoDB persistence with a Yjs snapshot plus a Quill delta mirror.
+- Added a peer catch-up flow so newly joined clients can move beyond the last autosaved snapshot.
+- Kept the current custom cursor system unchanged for this phase.
+
+Why it changed:
+- Redis solved transport scaling, but not collaboration correctness under concurrent edits.
+- Yjs upgrades the system from event-based syncing to a real shared-state model for document content.
+
+Interview explanation:
+- I kept the existing WebSocket gateway and scaling story, but changed the content layer underneath it to Yjs so the document itself converges through a CRDT model instead of naive delta relay.
+
+Learning docs for this phase:
+
+- [Architecture](./ARCHITECTURE.md)
+- [CRDT and Yjs 101](./CRDT_YJS_101.md)
+- [System Design Interview Guide](./SYSTEM_DESIGN_INTERVIEW_GUIDE.md)

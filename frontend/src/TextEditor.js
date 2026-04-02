@@ -4,6 +4,8 @@ import "quill/dist/quill.snow.css"
 import { io } from "socket.io-client"
 import { useParams } from "react-router-dom"
 import { v4 as uuidV4 } from "uuid"
+import * as Y from "yjs"
+import { QuillBinding } from "y-quill"
 
 import CursorManager from "./CursorManager"
 
@@ -36,6 +38,9 @@ const CURSOR_COLORS = [
 ]
 const CLIENT_ID_STORAGE_KEY = "collab-editor-client-id"
 const DISPLAY_NAME_STORAGE_KEY = "collab-editor-display-name"
+const YJS_INITIAL_ORIGIN = Symbol("yjs-initial-origin")
+const YJS_REMOTE_ORIGIN = Symbol("yjs-remote-origin")
+const YJS_PEER_SYNC_ORIGIN = Symbol("yjs-peer-sync-origin")
 
 let collaboratorCache
 
@@ -92,12 +97,93 @@ function normalizeRange(range) {
     }
 }
 
+function normalizeBinaryUpdate(update) {
+    if (!update) return null
+
+    if (update instanceof Uint8Array) {
+        return update
+    }
+
+    if (ArrayBuffer.isView(update)) {
+        return new Uint8Array(update.buffer, update.byteOffset, update.byteLength)
+    }
+
+    if (update instanceof ArrayBuffer) {
+        return new Uint8Array(update)
+    }
+
+    if (Array.isArray(update)) {
+        return Uint8Array.from(update)
+    }
+
+    if (update.type === "Buffer" && Array.isArray(update.data)) {
+        return Uint8Array.from(update.data)
+    }
+
+    return null
+}
+
+function uint8ArrayToBase64(bytes) {
+    if (!bytes || bytes.byteLength === 0) return ""
+
+    let binary = ""
+    const chunkSize = 0x8000
+
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+        const chunk = bytes.subarray(index, index + chunkSize)
+        binary += String.fromCharCode(...chunk)
+    }
+
+    return window.btoa(binary)
+}
+
+function base64ToUint8Array(base64) {
+    if (!base64) return new Uint8Array(0)
+
+    const binary = window.atob(base64)
+    const bytes = new Uint8Array(binary.length)
+
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index)
+    }
+
+    return bytes
+}
+
+function createYjsSession(documentId) {
+    const ydoc = new Y.Doc()
+
+    return {
+        documentId,
+        ydoc,
+        yText: ydoc.getText("quill"),
+        binding: null,
+        handleDocUpdate: null,
+    }
+}
+
+function destroyYjsSession(session) {
+    if (!session) return
+
+    if (session.binding) {
+        session.binding.destroy()
+        session.binding = null
+    }
+
+    if (session.handleDocUpdate) {
+        session.ydoc.off("update", session.handleDocUpdate)
+    }
+
+    session.ydoc.destroy()
+}
+
 export default function TextEditor() {
     const { id: documentId } = useParams()
     const [quill, setQuill] = useState()
     const [socket, setSocket] = useState()
     const [collaborator] = useState(() => getOrCreateCollaborator())
     const cursorManagerRef = useRef(null)
+    const yjsSessionRef = useRef(null)
     const documentReadyRef = useRef(false)
     const cursorThrottleRef = useRef({
         lastSentAt: 0,
@@ -172,9 +258,31 @@ export default function TextEditor() {
 
         documentReadyRef.current = false
         cursorManagerRef.current?.clearAll()
+        quill.disable()
+        quill.setText("Loading...")
 
-        const handleLoadDocument = (document) => {
-            quill.setContents(document)
+        const session = createYjsSession(documentId)
+        yjsSessionRef.current = session
+
+        session.handleDocUpdate = (update, origin) => {
+            if (yjsSessionRef.current !== session) return
+            if (!documentReadyRef.current || origin !== session.binding) return
+
+            socket.emit("yjs-update", { update })
+        }
+
+        session.ydoc.on("update", session.handleDocUpdate)
+
+        const handleLoadDocument = ({ yjsStateBase64 } = {}) => {
+            if (yjsSessionRef.current !== session) return
+
+            const baselineUpdate = base64ToUint8Array(yjsStateBase64)
+
+            if (baselineUpdate.byteLength > 0) {
+                Y.applyUpdate(session.ydoc, baselineUpdate, YJS_INITIAL_ORIGIN)
+            }
+
+            session.binding = new QuillBinding(session.yText, quill)
             quill.enable()
             documentReadyRef.current = true
 
@@ -195,29 +303,67 @@ export default function TextEditor() {
             cursorManagerRef.current?.clearAll()
             socket.off("load-document", handleLoadDocument)
             quill.disable()
+            destroyYjsSession(session)
+
+            if (yjsSessionRef.current === session) {
+                yjsSessionRef.current = null
+            }
         }
     }, [socket, quill, documentId, collaborator, emitCursorMove])
-
 
     useEffect(() => {
         if (socket == null || quill == null) return
 
         const interval = setInterval(() => {
-            socket.emit("save-document", quill.getContents())
+            const session = yjsSessionRef.current
+            if (!documentReadyRef.current || !session || session.documentId !== documentId) return
+
+            socket.emit("save-document", {
+                yjsStateBase64: uint8ArrayToBase64(Y.encodeStateAsUpdate(session.ydoc)),
+                data: quill.getContents(),
+            })
         }, SAVE_INTERVAL_MS)
 
         return () => {
             clearInterval(interval)
         }
-
-    }, [socket, quill])
-
+    }, [socket, quill, documentId])
 
     useEffect(() => {
-        if (socket == null || quill == null) return
+        if (socket == null) return
 
-        const handleReceiveChanges = (rawDelta) => {
-            quill.updateContents(new Delta(rawDelta))
+        const handleYjsUpdate = ({ documentId: updateDocumentId, update } = {}) => {
+            const session = yjsSessionRef.current
+            if (!session || session.documentId !== updateDocumentId) return
+
+            const normalizedUpdate = normalizeBinaryUpdate(update)
+            if (!normalizedUpdate) return
+
+            Y.applyUpdate(session.ydoc, normalizedUpdate, YJS_REMOTE_ORIGIN)
+            cursorManagerRef.current?.scheduleRender()
+        }
+
+        const handleRequestDocumentSync = ({ documentId: syncDocumentId, requestId, targetSocketId } = {}) => {
+            const session = yjsSessionRef.current
+            if (!session || session.documentId !== syncDocumentId) return
+            if (!requestId || !targetSocketId || targetSocketId === socket.id) return
+
+            socket.emit("document-sync", {
+                documentId: syncDocumentId,
+                requestId,
+                targetSocketId,
+                update: Y.encodeStateAsUpdate(session.ydoc),
+            })
+        }
+
+        const handleDocumentSync = ({ documentId: syncDocumentId, update } = {}) => {
+            const session = yjsSessionRef.current
+            if (!session || session.documentId !== syncDocumentId) return
+
+            const normalizedUpdate = normalizeBinaryUpdate(update)
+            if (!normalizedUpdate) return
+
+            Y.applyUpdate(session.ydoc, normalizedUpdate, YJS_PEER_SYNC_ORIGIN)
             cursorManagerRef.current?.scheduleRender()
         }
 
@@ -233,16 +379,20 @@ export default function TextEditor() {
             cursorManagerRef.current?.removeCursor(clientId)
         }
 
-        socket.on("receive-changes", handleReceiveChanges)
+        socket.on("yjs-update", handleYjsUpdate)
+        socket.on("request-document-sync", handleRequestDocumentSync)
+        socket.on("document-sync", handleDocumentSync)
         socket.on("cursor-update", handleCursorUpdate)
         socket.on("cursor-remove", handleCursorRemove)
 
         return () => {
-            socket.off("receive-changes", handleReceiveChanges)
+            socket.off("yjs-update", handleYjsUpdate)
+            socket.off("request-document-sync", handleRequestDocumentSync)
+            socket.off("document-sync", handleDocumentSync)
             socket.off("cursor-update", handleCursorUpdate)
             socket.off("cursor-remove", handleCursorRemove)
         }
-    }, [socket, quill, collaborator.clientId])
+    }, [socket, collaborator.clientId])
 
     useEffect(() => {
         if (socket == null || quill == null) return
@@ -255,7 +405,6 @@ export default function TextEditor() {
 
             if (source !== "user") return
 
-            socket.emit("send-changes", delta)
             emitCursorMove(quill.getSelection())
         }
 

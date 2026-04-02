@@ -1,7 +1,84 @@
+const crypto = require("crypto")
+
 const {
     loadDocument,
     persistDocument,
 } = require("../controllers/documentController")
+
+const DOCUMENT_SYNC_TIMEOUT_MS = 5000
+
+const pendingDocumentSyncs = new Map()
+
+function normalizeBinaryUpdate(update) {
+    if (!update) return null
+
+    if (update instanceof Uint8Array) {
+        return update
+    }
+
+    if (ArrayBuffer.isView(update)) {
+        return new Uint8Array(update.buffer, update.byteOffset, update.byteLength)
+    }
+
+    if (update instanceof ArrayBuffer) {
+        return new Uint8Array(update)
+    }
+
+    if (Array.isArray(update)) {
+        return Uint8Array.from(update)
+    }
+
+    if (update.type === "Buffer" && Array.isArray(update.data)) {
+        return Uint8Array.from(update.data)
+    }
+
+    return null
+}
+
+function clearPendingDocumentSync(requestId) {
+    if (!requestId) return
+
+    const pendingSync = pendingDocumentSyncs.get(requestId)
+    if (!pendingSync) return
+
+    clearTimeout(pendingSync.timeoutId)
+    pendingDocumentSyncs.delete(requestId)
+}
+
+function registerPendingDocumentSync(documentId, targetSocketId) {
+    const requestId = crypto.randomUUID()
+    const timeoutId = setTimeout(() => {
+        pendingDocumentSyncs.delete(requestId)
+    }, DOCUMENT_SYNC_TIMEOUT_MS)
+
+    pendingDocumentSyncs.set(requestId, {
+        documentId,
+        targetSocketId,
+        fulfilled: false,
+        timeoutId,
+    })
+
+    return requestId
+}
+
+function fulfillPendingDocumentSync(io, { requestId, documentId, targetSocketId, update }) {
+    const pendingSync = pendingDocumentSyncs.get(requestId)
+    if (!pendingSync) return false
+    if (pendingSync.fulfilled) return false
+    if (pendingSync.documentId !== documentId || pendingSync.targetSocketId !== targetSocketId) {
+        return false
+    }
+
+    pendingSync.fulfilled = true
+    clearPendingDocumentSync(requestId)
+
+    io.to(targetSocketId).emit("document-sync", {
+        documentId,
+        update,
+    })
+
+    return true
+}
 
 function emitCursorRemoval(socket, documentId) {
     if (!documentId || !socket.data.user?.clientId) return
@@ -12,6 +89,18 @@ function emitCursorRemoval(socket, documentId) {
 }
 
 function registerSocketHandlers(io) {
+    io.on("resolve-document-sync", (payload = {}) => {
+        const update = normalizeBinaryUpdate(payload.update)
+        if (!update) return
+
+        fulfillPendingDocumentSync(io, {
+            requestId: payload.requestId,
+            documentId: payload.documentId,
+            targetSocketId: payload.targetSocketId,
+            update,
+        })
+    })
+
     io.on("connection", (socket) => {
         socket.on("get-document", async (documentId) => {
             const document = await loadDocument(documentId)
@@ -24,9 +113,24 @@ function registerSocketHandlers(io) {
                 socket.leave(previousDocumentId)
             }
 
+            clearPendingDocumentSync(socket.data.pendingDocumentSyncRequestId)
+            socket.data.pendingDocumentSyncRequestId = null
             socket.data.documentId = documentId
             socket.join(documentId)
-            socket.emit("load-document", document.data)
+            socket.emit("load-document", document)
+
+            const roomSockets = await io.in(documentId).allSockets()
+
+            if (roomSockets.size > 1) {
+                const requestId = registerPendingDocumentSync(documentId, socket.id)
+                socket.data.pendingDocumentSyncRequestId = requestId
+
+                socket.to(documentId).emit("request-document-sync", {
+                    documentId,
+                    requestId,
+                    targetSocketId: socket.id,
+                })
+            }
         })
 
         socket.on("join-document", ({ documentId, user } = {}) => {
@@ -41,11 +145,42 @@ function registerSocketHandlers(io) {
             }
         })
 
-        socket.on("send-changes", (delta) => {
+        socket.on("yjs-update", ({ update } = {}) => {
             const { documentId } = socket.data
             if (!documentId) return
 
-            socket.broadcast.to(documentId).emit("receive-changes", delta)
+            const normalizedUpdate = normalizeBinaryUpdate(update)
+            if (!normalizedUpdate) return
+
+            socket.to(documentId).emit("yjs-update", {
+                documentId,
+                update: normalizedUpdate,
+            })
+        })
+
+        socket.on("document-sync", ({ documentId, requestId, targetSocketId, update } = {}) => {
+            if (!documentId || socket.data.documentId !== documentId || !requestId || !targetSocketId) {
+                return
+            }
+
+            const normalizedUpdate = normalizeBinaryUpdate(update)
+            if (!normalizedUpdate) return
+
+            const fulfilledLocally = fulfillPendingDocumentSync(io, {
+                requestId,
+                documentId,
+                targetSocketId,
+                update: normalizedUpdate,
+            })
+
+            if (!fulfilledLocally) {
+                io.serverSideEmit("resolve-document-sync", {
+                    requestId,
+                    documentId,
+                    targetSocketId,
+                    update: normalizedUpdate,
+                })
+            }
         })
 
         socket.on("cursor-move", ({ range } = {}) => {
@@ -58,14 +193,18 @@ function registerSocketHandlers(io) {
             })
         })
 
-        socket.on("save-document", async (data) => {
+        socket.on("save-document", async (payload = {}) => {
             const { documentId } = socket.data
             if (!documentId) return
 
-            await persistDocument(documentId, data)
+            await persistDocument(documentId, {
+                data: payload.data,
+                yjsStateBase64: payload.yjsStateBase64,
+            })
         })
 
         socket.on("disconnect", () => {
+            clearPendingDocumentSync(socket.data.pendingDocumentSyncRequestId)
             emitCursorRemoval(socket, socket.data.documentId)
         })
     })

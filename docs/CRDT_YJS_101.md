@@ -1,19 +1,23 @@
 # CRDT and Yjs 101
 
-This document explains the next major upgrade for the project.
+This document explains the CRDT layer that is now implemented in the project.
 
-## 1. Why is another collaboration upgrade needed?
+## 1. What is implemented today?
 
-The current project already syncs edits in real time.
+Today, document content sync is powered by Yjs.
 
-That is good, but it still has a limitation:
+That means:
 
-- it is delta-based synchronization
-- it is not yet a full conflict-free shared data model
+- Quill is still the editor UI
+- Yjs is the shared document model
+- Socket.io is still the transport layer
+- Redis is still the scaling layer for multi-instance delivery
+- MongoDB stores a persisted Yjs snapshot plus a Quill delta mirror
 
-As concurrency grows, you want a system that is much better at merging edits safely and predictably.
+Important limitation:
 
-That is where CRDTs and Yjs come in.
+- cursor and presence state are still handled by the custom socket-based cursor system
+- this phase did not move presence to Yjs awareness yet
 
 ## 2. What is a CRDT?
 
@@ -27,25 +31,25 @@ The simple idea is:
 
 That is powerful for collaborative editing.
 
-## 3. How is that different from the current system?
+## 3. How is that different from the older delta-sync version?
 
-Current system:
+Earlier version:
 
-- Quill creates deltas
-- clients send deltas
-- other clients apply deltas
-- cursors are adjusted with transform logic
+- Quill created deltas
+- clients sent those deltas directly
+- other clients applied those deltas directly
 
-Planned CRDT system:
+Current version:
 
-- each client keeps a shared CRDT document
-- updates are merged by the CRDT model itself
-- the final state converges automatically
+- each client keeps a local Yjs document
+- Quill is bound to that shared Yjs text
+- clients exchange Yjs updates instead of raw editor deltas
+- the document converges through the CRDT model itself
 
 So the difference is:
 
-- current system: real-time event sync
-- CRDT system: shared conflict-resilient data model
+- older version: event-based delta sync
+- current version: CRDT-based shared document sync
 
 ## 4. What is Yjs?
 
@@ -64,16 +68,16 @@ Why Yjs is a strong choice:
 - good performance
 - widely recognized in collaborative app development
 
-## 5. What would Yjs add to this project?
+## 5. What Yjs adds to this project
 
-Yjs would improve:
+Yjs improves:
 
 - conflict handling
 - collaboration correctness
 - offline-friendly behavior
 - eventual convergence of shared state
 
-It also gives a stronger architecture story in interviews.
+It also gives a stronger architecture story in interviews because sending realtime events is no longer the whole collaboration model.
 
 ## 6. What is awareness in Yjs?
 
@@ -93,21 +97,22 @@ That is useful because:
 - document content should be persisted
 - cursor positions should be live but not stored as document content
 
-## 7. How would migration likely look in this project?
+## 7. How this project uses Yjs right now
 
 High level:
 
-1. Replace the current delta broadcast model for text content
-2. Introduce a Yjs shared document
-3. Sync Yjs updates over a WebSocket provider
-4. Keep presence and cursor state aligned with Yjs awareness
-5. Decide how snapshots or persistence will work with Yjs
+1. The backend loads a persisted Yjs baseline, or converts a legacy Quill delta document into Yjs.
+2. The frontend creates one `Y.Doc` per open document.
+3. `QuillBinding` binds Quill to `ydoc.getText("quill")`.
+4. Local Yjs updates are sent over Socket.io with `yjs-update`.
+5. Remote clients apply those updates into their own Yjs document.
+6. New clients can request a live peer catch-up after the persisted baseline loads.
 
-The current cursor work is still useful because:
+The current cursor work is still relevant because:
 
-- it teaches real-time lifecycle handling
-- it teaches remote presence concepts
-- it prepares you to think about awareness and rendering
+- it handles realtime lifecycle cleanup already
+- it keeps presence separate from persisted document content
+- it is a reasonable bridge until Yjs awareness is introduced
 
 ## 8. OT vs CRDT in simple words
 
@@ -118,23 +123,21 @@ Very simple comparison:
 - OT transforms operations relative to each other
 - CRDTs design the data model so replicas converge automatically
 
-For interviews, you do not need a textbook explanation.
+You can now say:
 
-You just need to say:
+> The current editor uses Yjs for CRDT-based content sync, but cursor and presence handling are still on a custom realtime layer rather than Yjs awareness.
 
-> Our current version is not yet a CRDT engine. The next upgrade is Yjs, which gives us a proper CRDT-based shared document model.
+That is a strong and honest answer.
 
-That is enough unless the interviewer goes much deeper.
-
-## 9. Why Yjs is a good resume upgrade
+## 9. Why Yjs is a strong resume upgrade
 
 It moves the project from:
 
-- real-time collaboration demo
+- event-driven collaboration demo
 
 toward:
 
-- advanced collaborative systems engineering
+- real shared-state collaboration engineering
 
 That matters because it shows you understand that sending events is not the same as solving distributed state convergence.
 
@@ -142,10 +145,18 @@ That matters because it shows you understand that sending events is not the same
 
 You can say:
 
-> The current editor uses delta-based real-time synchronization. The next planned upgrade is Yjs so the collaboration model becomes CRDT-based instead of just event-based. That would improve correctness under concurrent edits and give the editor a more production-grade shared-state foundation.
+> The current editor uses Yjs for CRDT-based content sync over our existing Socket.io transport. That means content convergence is handled by the shared data model, while cursor presence is still managed separately through custom socket events. Redis still scales the transport layer across backend instances.
 
-## 11. What to read next
+## 11. What is still left after this phase
 
-If you want deployment context after this, read:
+The next meaningful upgrades are:
 
-- [Docker and Kubernetes 101](./DOCKER_KUBERNETES_101.md)
+- version history
+- Yjs awareness for presence and cursors
+- Dockerized deployment
+
+## 12. What to read next
+
+If you want system-design context after this, read:
+
+- [System Design Interview Guide](./SYSTEM_DESIGN_INTERVIEW_GUIDE.md)

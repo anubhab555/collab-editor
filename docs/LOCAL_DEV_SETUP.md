@@ -1,40 +1,94 @@
 # Local Dev Setup
 
-This doc explains how to run the project locally without getting stuck on MongoDB setup details.
+This doc explains how to run the project locally without mixing startup instructions and testing instructions together.
 
 Use this when you want:
 
-- a clean startup flow
-- a clean reset flow
-- a practical checklist for manual testing
+- the right startup flow for your environment
+- a clean local reset flow
+- a separate test checklist after the app is running
 
-## What Needs To Be Running
+## Startup Modes
 
-For the current single-node version, you need:
+There are two normal ways to run the project locally.
 
-1. local MongoDB
-2. backend server
-3. frontend server
+### 1. Single-node mode
 
-Later, when you test Redis scaling, you will also need Redis and a second backend/frontend instance.
+Use this when you want the app to work without Redis.
 
-## Redis In This Project
+What runs:
 
-Redis is the scaling layer for Socket.io.
+1. MongoDB
+2. one backend instance
+3. one frontend instance
 
-It is not needed for:
+What you get:
 
-- single-node editing
-- single-node cursor tracking
-- MongoDB autosave
+- real-time editing
+- remote cursors
+- autosave and reload
 
-It is needed for:
+What you do not get:
 
-- cross-instance realtime sync between backend `:3001` and backend `:3002`
-- cross-instance cursor propagation
-- proving the system can scale beyond one Node.js process
+- cross-instance event propagation
 
-For local development on this machine, the Redis workflow uses Docker.
+### 2. Redis-scaled mode
+
+Use this when you want to validate the distributed realtime flow.
+
+What runs:
+
+1. MongoDB
+2. Redis
+3. backend instance on `:3001`
+4. backend instance on `:3002`
+5. frontend instance on `:3000`
+6. frontend instance on `:3003`
+
+What you get:
+
+- text sync across backend instances
+- cursor sync across backend instances
+- proof that Socket.io events propagate through Redis pub/sub
+
+## MongoDB
+
+MongoDB stores the autosaved document state.
+
+The backend defaults to:
+
+```text
+mongodb://127.0.0.1:27017/collab-editor
+```
+
+### If Windows MongoDB service is already running
+
+Use that directly.
+You do not need `npm run mongo:start`.
+
+### If you need the repo-managed fallback MongoDB process
+
+Run these from the repo root:
+
+```bash
+npm run mongo:start
+npm run mongo:status
+npm run mongo:stop
+npm run mongo:reset
+```
+
+Notes:
+
+- `mongo:start` is a fallback local `mongod` flow
+- `mongo:reset` is only for the repo-managed fallback MongoDB process
+- local fallback MongoDB data lives in `%LOCALAPPDATA%\collab-editor\mongo\data`
+- local fallback MongoDB logs live in `%TEMP%\collab-editor-mongod.log`
+
+## Redis
+
+Redis is only needed for Redis-scaled mode.
+
+For local development on this machine, Redis is started with Docker.
 
 ### Redis Docker commands
 
@@ -59,80 +113,78 @@ docker stop collab-redis
 Important:
 
 - `docker stop collab-redis` is the recommended outage test
-- pausing Docker Engine is not the best failure simulation because it can freeze dependencies instead of producing a clean Redis connection error
+- pausing Docker Engine is not the best failure simulation because it can freeze dependencies instead of producing a clean Redis connection failure
 
-## MongoDB In This Project
+## Startup Flows
 
-MongoDB is used for document persistence.
+### Single-node startup
 
-Today, the editor autosaves the Quill document to MongoDB every 2 seconds.
-That means:
+#### Service-managed MongoDB
 
-- if MongoDB is down, the backend cannot start
-- if MongoDB is up, reloads can restore saved document content
+```bash
+cd backend
+npm run devStart
+cd ../frontend
+npm start
+```
 
-For local development, this repo now includes helper scripts so you do not need to manually type a long `mongod` command every time.
-
-If your machine already has the Windows `MongoDB` service installed and running, you can use that directly and skip the helper startup step.
-
-## Local MongoDB Commands
-
-Run these from the repo root:
+#### Repo-managed fallback MongoDB
 
 ```bash
 npm run mongo:start
-npm run mongo:status
-npm run mongo:stop
-npm run mongo:reset
+cd backend
+npm run devStart
+cd ../frontend
+npm start
 ```
 
-What they do:
+### Redis-scaled startup
 
-- `mongo:start`: starts MongoDB in the background on `127.0.0.1:27017`
-- `mongo:status`: tells you whether MongoDB is running
-- `mongo:stop`: stops the local `mongod` process listening on port `27017`
-- `mongo:reset`: stops local MongoDB, deletes the local data files, and gives you a fresh empty local database
+1. Start Redis:
 
-Important:
-
-- these helper commands are for the repo-managed fallback MongoDB process
-- if Windows `MongoDB` service is already running, `mongo:start` becomes a no-op and `mongo:reset` is not the right reset path
-
-## Where Local Mongo Files Live
-
-- local data: `%LOCALAPPDATA%\collab-editor\mongo\data`
-- local log: `%TEMP%\collab-editor-mongod.log`
-
-Both are intentionally kept outside the repo so your workspace stays cleaner.
-
-## Default Local Connection String
-
-The backend defaults to:
-
-```text
-mongodb://127.0.0.1:27017/collab-editor
+```bash
+docker start collab-redis
 ```
 
-You can override that with `MONGODB_URI` if needed later.
+2. Make sure MongoDB is available:
 
-## About The Old `.local` Folder
+- if Windows MongoDB service is running, use that
+- otherwise run `npm run mongo:start`
 
-The project no longer needs MongoDB data inside the repo.
+3. Start backend instance 1:
 
-Earlier, a repo-local `.local/mongo` directory was used for convenience during development.
-That made cleanup and git status noisier than it needed to be.
+```bash
+cd backend
+npm run devStart:redis
+```
 
-Now:
+4. Start backend instance 2:
 
-- local MongoDB data lives in `%LOCALAPPDATA%`
-- local MongoDB logs live in `%TEMP%`
-- `.local/` is ignored by git
+```bash
+cd backend
+npm run devStart:redis:3002
+```
 
-If an old `.local/mongo` folder still exists from earlier runs, `npm run mongo:reset` will clean it up.
+5. Start frontend instance 1:
+
+```bash
+cd frontend
+npm start
+```
+
+6. Start frontend instance 2:
+
+```bash
+cd frontend
+npm run start:socket3002
+```
+
+Notes:
+
+- the backend allows both `http://localhost:3000` and `http://localhost:3003` by default for this flow
+- `localhost:3000` and `localhost:3003` are different origins, so they naturally use different browser storage and appear as different collaborators
 
 ## Clean Start Flow
-
-If you want to start the app from a clean local state:
 
 ### If you are using the repo-managed fallback MongoDB process
 
@@ -155,54 +207,7 @@ Instead:
 2. clear the `collab-editor` database from MongoDB Compass if you want a clean app state
 3. start the backend and frontend normally
 
-## Normal Daily Start Flow
-
-If you already have local data and just want to run the app:
-
-### Service-managed MongoDB
-
-```bash
-cd backend
-npm run devStart
-cd ../frontend
-npm start
-```
-
-### Repo-managed fallback MongoDB
-
-```bash
-npm run mongo:start
-cd backend
-npm run devStart
-cd ../frontend
-npm start
-```
-
-You do not need a dedicated terminal for MongoDB when you use `mongo:start`, because it runs in the background.
-You do still need MongoDB to be running whenever the backend is running.
-
-## Single-Node Mode Without Redis
-
-This is the default mode when `REDIS_URL` is not set.
-
-Use it when you want the app to run without the distributed scaling layer:
-
-```bash
-cd backend
-npm run devStart
-cd ../frontend
-npm start
-```
-
-This mode still supports:
-
-- real-time editing
-- remote cursors
-- autosave and reload
-
-It just does not propagate events across multiple backend instances.
-
-## Why You May Not See Different Cursors
+## Collaborator Identity Note
 
 The current cursor system stores collaborator identity in `localStorage`.
 
@@ -212,60 +217,62 @@ That means:
 - normal tabs in the same browser often look like the same user
 - remote cursor updates for your own `clientId` are intentionally ignored
 
-So if you want to test truly different collaborators, do this:
+If you want to test different collaborators in single-node mode, use:
 
-- open the same document in a normal browser window and an incognito/private window
-- or use two different browser profiles
-- or use two different browsers
+- normal window plus incognito/private window
+- two browser profiles
+- or two different browsers
 
-That is the correct way to test different remote cursors with the current implementation.
+In Redis-scaled mode, `localhost:3000` and `localhost:3003` already count as different origins, so they naturally behave like different collaborators.
 
-## Manual Test Checklist
+## Testing
 
-### Single-node tests
+### Single-node checklist
 
 1. Start MongoDB, backend, and frontend.
 2. Open the same document in two tabs and verify text sync works in real time.
-3. Open a different document in a third tab and verify it stays isolated.
-4. Type in a document, wait 2 seconds, refresh, and verify the document reloads from MongoDB.
-5. Open the same document in two different browser storage contexts and verify remote cursors appear.
-6. Move the caret, type before another user's caret, and verify cursor drift correction looks reasonable.
-7. Blur one editor, close one tab, or switch one tab to another document and verify the old cursor disappears.
+3. Type concurrently in both tabs and verify the document converges cleanly.
+4. Open a different document in a third tab and verify it stays isolated.
+5. Type in a document, wait 2 seconds, refresh, and verify the document reloads from MongoDB.
+6. Open the same document in two different browser storage contexts and verify remote cursors appear.
+7. Move the caret, type before another user's caret, and verify cursor drift correction looks reasonable.
+8. Blur one editor, close one tab, or switch one tab to another document and verify the old cursor disappears.
+9. Join a third client after active edits but before autosave and verify it catches up to the latest in-memory state.
+10. If you have a document created before the Yjs migration, reopen it and verify it still loads and resaves correctly.
 
-### Redis scaling tests
+### Redis-scaled checklist
 
-Run these only after Redis is running locally through Docker:
+1. Start Redis, MongoDB, both backends, and both frontends.
+2. Open the same document in `localhost:3000` and `localhost:3003`.
+3. Verify text sync works across backend instances.
+4. Type concurrently in both frontends and verify the document converges correctly across backends.
+5. Verify cursor sync works across backend instances.
+6. Join a third client after active edits but before autosave and verify peer catch-up still works.
+7. Open a different document in one frontend and verify document isolation still holds.
+8. Edit from both frontends, wait 2 seconds, refresh, and verify persistence still works.
 
-1. `docker start collab-redis`
-2. `npm run mongo:start`
-3. `cd backend && npm run devStart:redis`
-4. `cd backend && npm run devStart:redis:3002`
-5. `cd frontend && npm start`
-6. `cd frontend && npm run start:socket3002`
-7. Open the same document in both frontend instances and verify text sync and cursor sync still work across backend instances.
-8. Open a different document in one frontend and verify document isolation still holds.
-9. Edit from both frontends, wait 2 seconds, refresh, and verify persistence still works.
-10. Stop Redis with `docker stop collab-redis`, then rerun `npm run devStart:redis` and confirm startup fails loudly.
+### Redis failure test
 
-The backend now allows both `http://localhost:3000` and `http://localhost:3003` by default for this local flow.
-If you need custom frontend origins later, set backend `CLIENT_ORIGIN` as a comma-separated list.
-
-### Redis-scaled local startup summary
+1. Stop Redis:
 
 ```bash
-docker start collab-redis
-cd backend && npm run devStart:redis
-cd backend && npm run devStart:redis:3002
-cd frontend && npm start
-cd frontend && npm run start:socket3002
+docker stop collab-redis
 ```
+
+2. Rerun:
+
+```bash
+cd backend
+npm run devStart:redis
+```
+
+3. Confirm the backend fails loudly instead of silently falling back.
 
 ## What To Test Next
 
-After you finish the single-node cursor tests, the next meaningful test is Redis multi-instance verification.
+After the current Yjs validation, the next meaningful improvements are:
 
-After that, the next implementation phase is:
+- version history and restore flow
+- moving presence and cursor state toward Yjs awareness
 
-- Yjs and CRDT-based collaboration
-
-That phase will improve correctness under concurrent edits, not just transport and scaling.
+That keeps the roadmap focused on collaboration depth now that transport scaling and CRDT content sync are already in place.

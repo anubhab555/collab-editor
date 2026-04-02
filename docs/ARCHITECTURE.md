@@ -4,15 +4,16 @@ This document explains what the project does today, how the main parts fit toget
 
 The most important truth to remember is this:
 
-- Today, the editor uses delta-based real-time sync with Socket.io.
+- Today, document content uses Yjs-based CRDT sync.
+- Today, cursor and presence updates still use the custom Socket.io cursor system.
 - Today, the backend can run in single-node mode or Redis-scaled mode.
-- Today, persistence is handled by MongoDB autosave.
-- Today, the project is not yet a CRDT system.
-- The planned upgrade that changes collaboration correctness in a big way is Yjs.
+- Today, MongoDB persistence stores a Yjs snapshot plus a Quill delta mirror.
+- The next major upgrades are version history and Yjs awareness-style presence.
 
 If you want the step-by-step change history, read [Design Flow](./Design%20Flow.md).
 If you want beginner-friendly explanations of the concepts, start with [Learning Path](./LEARNING_PATH.md).
 If you want the exact local startup steps, read [Local Dev Setup](./LOCAL_DEV_SETUP.md).
+If you want interview-focused HLD and LLD preparation, read [System Design Interview Guide](./SYSTEM_DESIGN_INTERVIEW_GUIDE.md).
 
 ## Current System At A Glance
 
@@ -20,25 +21,26 @@ If you want the exact local startup steps, read [Local Dev Setup](./LOCAL_DEV_SE
 |------|---------------|
 | Editor | React + Quill |
 | Realtime transport | Socket.io |
-| Collaboration model | Delta broadcast with cursor drift correction |
+| Content model | Yjs CRDT |
+| Cursor model | Custom Socket.io cursor sync with drift correction |
 | Horizontal scaling | Socket.io Redis adapter when `REDIS_URL` is set |
-| Persistence | MongoDB via Mongoose |
+| Persistence | MongoDB with Yjs snapshot + Quill delta mirror |
 | Identity | Browser-persisted `localStorage` identity |
-| Cursor rendering | Custom DOM overlay via `CursorManager` |
-| Next major upgrade | CRDT collaboration with Yjs |
+| Next major upgrade | Version history and Yjs awareness-style presence |
 
 ## Honest Architecture Summary
 
 This is the clean way to describe the project in an interview:
 
-- The frontend is a React application that mounts a Quill editor and connects to the backend with Socket.io.
+- The frontend is a React application that mounts a Quill editor.
+- Quill is bound to a Yjs shared document for content collaboration.
 - The backend is a Node.js Socket.io server with a layered structure for config, services, controllers, and socket handling.
-- Documents are stored in MongoDB and autosaved periodically.
-- Real-time edits and cursor updates are sent through Socket.io rooms keyed by `documentId`.
-- When Redis is enabled, Socket.io uses Redis pub/sub so events can move across multiple backend instances.
-- The current sync model is strong for a portfolio project, but it is still delta-based synchronization, not full CRDT or full OT conflict resolution.
+- Each document maps to a Socket.io room keyed by `documentId`.
+- MongoDB stores a persisted Yjs snapshot and a Quill delta mirror.
+- When Redis is enabled, Socket.io uses Redis pub/sub so content and cursor events move across multiple backend instances.
+- Cursor presence is still a separate custom realtime layer and is not yet moved to Yjs awareness.
 
-That last point matters. It makes your explanation more credible.
+That split matters. It makes your explanation more credible.
 
 ## Runtime Architecture
 
@@ -47,9 +49,11 @@ graph TB
     subgraph Frontend["Frontend"]
         Browser["Browser tab"]
         React["React + Quill"]
+        YDoc["Yjs document"]
         Cursor["CursorManager"]
 
         Browser --> React
+        React --> YDoc
         React --> Cursor
     end
 
@@ -79,7 +83,7 @@ graph TB
     NodeB --> Mongo
 ```
 
-### What changes depending on environment
+### Runtime modes
 
 There are two valid runtime modes today:
 
@@ -105,13 +109,13 @@ Main files:
 
 Responsibilities:
 
-- Create or open a document URL
-- Initialize Quill
-- Connect to the Socket.io backend
-- Send document edits as Quill deltas
-- Send cursor positions
-- Render remote cursors efficiently
-- Persist user identity in `localStorage`
+- create or open a document URL
+- initialize Quill
+- bind Quill to a per-document Yjs text instance
+- send Yjs content updates over Socket.io
+- send cursor positions over Socket.io
+- render remote cursors efficiently
+- persist user identity in `localStorage`
 
 ### Backend
 
@@ -126,13 +130,14 @@ Main files:
 
 Responsibilities:
 
-- Start the Socket.io server
-- Connect to MongoDB
-- Optionally enable the Redis adapter
-- Join sockets to document rooms
-- Broadcast text changes and cursor changes
-- Save documents to MongoDB
-- Cleanly shut down Redis clients when the process exits
+- start the Socket.io server
+- connect to MongoDB
+- optionally enable the Redis adapter
+- join sockets to document rooms
+- broadcast Yjs content updates and cursor updates
+- coordinate peer catch-up for newly joined clients
+- save document snapshots to MongoDB
+- cleanly shut down Redis clients when the process exits
 
 ### Database
 
@@ -141,23 +146,20 @@ Documents are stored in MongoDB roughly like this:
 ```js
 {
   _id: "document-uuid",
-  data: <Quill Delta JSON>
+  data: <Quill Delta JSON mirror>,
+  yjsState: <Base64 Yjs snapshot>,
+  contentFormat: "yjs"
 }
 ```
 
-This is simple and works well for the current phase.
+`yjsState` is the primary persisted content format.
+`data` is kept as a Quill delta mirror for compatibility and easier inspection.
 It is not yet versioned history.
 
-For local development, the backend now defaults to:
+For local development, the backend defaults to:
 
 ```text
 mongodb://127.0.0.1:27017/collab-editor
-```
-
-The local MongoDB data path used by the helper scripts is:
-
-```text
-%LOCALAPPDATA%\collab-editor\mongo\data
 ```
 
 ## Collaboration Model Today
@@ -167,44 +169,47 @@ The local MongoDB data path used by the helper scripts is:
 1. The browser opens `/documents/:id`.
 2. The frontend emits `get-document(documentId)`.
 3. The backend finds or creates the document in MongoDB.
-4. The socket joins the room named after that `documentId`.
-5. The backend emits `load-document`.
-6. The client loads the Quill contents and enables editing.
+4. The backend returns a Yjs baseline with `load-document`.
+5. The frontend applies that Yjs state and binds Quill to the shared Yjs text.
+6. The backend can request a live peer catch-up so the joining client does not rely only on the last autosaved snapshot.
 
-### Edit flow
+### Content sync flow
 
 1. The user types in Quill.
-2. Quill produces a Delta.
-3. The frontend emits `send-changes(delta)`.
-4. The backend broadcasts `receive-changes(delta)` to the rest of the room.
-5. Other clients apply the delta with `quill.updateContents(delta)`.
+2. `QuillBinding` writes the change into the local Yjs document.
+3. The frontend emits `yjs-update`.
+4. The backend broadcasts that update to the rest of the document room.
+5. Other clients apply the Yjs update to their own Yjs document.
+6. Yjs ensures the shared content converges under concurrent edits.
+
+### Peer catch-up flow
+
+1. A new client joins a document room.
+2. The backend first sends the persisted Yjs baseline.
+3. The backend emits `request-document-sync` to existing peers in the room.
+4. One peer responds with `document-sync`.
+5. The backend forwards the first valid sync response to the joining socket.
+6. The joining client applies that update and catches up to the latest in-memory state.
 
 ### Cursor flow
 
 1. The user moves their caret or types.
 2. The frontend emits a throttled `cursor-move`.
-3. The backend uses room-scoped broadcasting to forward `cursor-update`.
-4. Other clients store the remote cursor state in `CursorManager`.
-5. `CursorManager` renders the markers with `requestAnimationFrame`.
+3. The backend forwards `cursor-update` to the rest of the room.
+4. Other clients store remote cursor state in `CursorManager`.
+5. `CursorManager` renders remote markers with `requestAnimationFrame`.
 
 ### Autosave flow
 
-1. Every 2 seconds, the client emits `save-document(quill.getContents())`.
-2. The backend upserts the document in MongoDB.
+1. Every 2 seconds, the client emits `save-document({ yjsStateBase64, data })`.
+2. The backend persists the latest Yjs snapshot plus the Quill delta mirror.
 
-## Why Cursor Drift Correction Exists
+## Why Cursor Drift Correction Still Exists
 
-Cursor drift is one of the first real problems in collaborative editors.
+Cursor presence is still live socket state, not Yjs awareness state.
 
-Example:
-
-- User B's cursor is at index 10
-- User A inserts 5 characters at index 5
-- User B's cursor should now move to index 15
-
-The project handles that today by transforming stored cursor positions with Quill Delta `transformPosition(...)`.
-
-This is a strong real-time feature, but it does not mean the whole editor is already a full CRDT system.
+That means cursor indices still need transform logic when text changes arrive.
+The project keeps that logic in `CursorManager` so remote cursors stay visually aligned while the content layer has already moved to Yjs.
 
 ## What Redis Adds
 
@@ -212,13 +217,13 @@ Without Redis:
 
 - backend instance A only knows about sockets connected to A
 - backend instance B only knows about sockets connected to B
-- users connected to different backend instances will not see each other's real-time events
+- users connected to different backend instances will not see each other's realtime events
 
 With Redis:
 
 - backend instance A publishes socket events through Redis
 - backend instance B receives the same events through Redis
-- document edits and cursor updates work across multiple Node.js processes
+- Yjs content updates and cursor updates work across multiple Node.js processes
 
 The Redis adapter is implemented in `backend/config/redisAdapter.js`.
 
@@ -233,44 +238,18 @@ The Redis adapter is implemented in `backend/config/redisAdapter.js`.
   - `[Redis] Adapter enabled`
 - graceful shutdown on `SIGINT` and `SIGTERM`
 
-## Architecture Decisions Worth Explaining In Interviews
-
-### Why Socket.io instead of plain WebSocket?
-
-- Easier room-based broadcasting
-- Helpful reconnect and event abstractions
-- Better developer velocity for a project like this
-
-### Why MongoDB for now?
-
-- Easy document-shaped storage for Quill Delta JSON
-- Fast to iterate on for a real-time editor prototype
-
-### Why custom cursor rendering?
-
-- Remote cursors need frequent updates
-- A DOM overlay lets the app avoid unnecessary React re-renders
-- `requestAnimationFrame` batching reduces layout thrashing
-
-### Why Redis as the next scaling step?
-
-- It solves cross-instance event propagation
-- It is a realistic production concern for WebSocket systems
-- It gives the project a stronger distributed-systems story
-
 ## What The Project Is Not Yet
 
 It is important to explain the limits clearly.
 
 The project is not yet:
 
-- a CRDT-based editor
-- a Yjs-powered shared document system
+- a full Yjs-awareness-based collaboration stack
 - a version-history system
-- a Dockerized deployment
+- a Dockerized production deployment
 - a Kubernetes deployment
 
-Those are planned future improvements, not current features.
+Those are still future improvements, not current features.
 
 ## Code Reading Order
 
@@ -282,17 +261,6 @@ If you want to understand the code quickly, read in this order:
 4. `backend/config/redisAdapter.js`
 5. `backend/server.js`
 6. `backend/services/documentService.js`
-
-## Learning Docs
-
-These are the beginner-friendly companion docs for interview prep:
-
-- [Learning Path](./LEARNING_PATH.md)
-- [Realtime Collaboration 101](./REALTIME_COLLABORATION_101.md)
-- [Redis Scaling 101](./REDIS_SCALING_101.md)
-- [CRDT and Yjs 101](./CRDT_YJS_101.md)
-- [Docker and Kubernetes 101](./DOCKER_KUBERNETES_101.md)
-- [Design Flow](./Design%20Flow.md)
 
 ## Local Verification Setup
 
@@ -308,7 +276,7 @@ cd frontend
 npm start
 ```
 
-Use this mode when you want the editor to work without Redis. Editing, cursors, and autosave still work; only cross-instance propagation is absent.
+Use this mode when you want the editor to work without Redis. Content sync, cursors, and autosave still work; only cross-instance propagation is absent.
 
 ### Redis-scaled mode
 
@@ -348,30 +316,8 @@ docker stop collab-redis
 Then rerun `npm run devStart:redis` and confirm the backend fails loudly instead of silently falling back.
 Pausing Docker Engine is not the preferred validation because it can freeze the dependency rather than simulate a clean Redis outage.
 
-## Cursor Identity Note
-
-If you open two normal tabs in the same browser profile, they usually share the same `localStorage` identity.
-
-That means they are useful for testing:
-
-- text sync
-- document isolation
-- autosave
-
-But they are not the right test for two distinct collaborators with different cursor labels.
-
-To test different remote cursors correctly, use:
-
-- normal window plus incognito/private window
-- two browser profiles
-- or two different browsers
-
-This is a deliberate result of the current identity model, not a cursor bug.
-
-In the local Redis-scaled flow, `localhost:3000` and `localhost:3003` are different origins, so they naturally use different browser storage and appear as separate collaborators.
-
 ## Interview One-Liner
 
 If you need a fast summary:
 
-> I built a real-time collaborative editor with React, Quill, Socket.io, MongoDB, and Redis. The current version supports delta-based editing, cursor tracking with drift correction, MongoDB autosave, and cross-instance Socket.io scaling through Redis. The next major step is upgrading collaboration correctness with Yjs and CRDTs.
+> I built a real-time collaborative editor with React, Quill, Yjs, Socket.io, MongoDB, and Redis. The current version uses Yjs for CRDT-based content sync, keeps cursor tracking as a custom realtime layer, persists Yjs snapshots to MongoDB, and scales Socket.io events across instances through Redis.

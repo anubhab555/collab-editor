@@ -1,14 +1,14 @@
 const {
-    findOrCreateDocument,
+    loadDocumentState,
     saveDocument,
 } = require("../services/documentService")
 
 async function loadDocument(documentId) {
-    return findOrCreateDocument(documentId)
+    return loadDocumentState(documentId)
 }
 
-async function persistDocument(documentId, data) {
-    return saveDocument(documentId, data)
+async function persistDocument(documentId, payload) {
+    return saveDocument(documentId, payload)
 }
 
 module.exports = {

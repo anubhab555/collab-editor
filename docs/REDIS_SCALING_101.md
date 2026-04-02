@@ -182,7 +182,7 @@ Redis solves cross-instance event propagation, but it does not replace proper co
 
 You can say:
 
-> Initially the collaboration system only worked correctly inside one Node.js process. I added the Socket.io Redis adapter so room broadcasts for document edits and cursor updates propagate across multiple backend instances. I also kept local development simple with env-gated single-node mode and added reconnect backoff, logging, and graceful shutdown for safer operations.
+> Initially the collaboration system only worked correctly inside one Node.js process. I added the Socket.io Redis adapter so room broadcasts for Yjs content updates and cursor updates propagate across multiple backend instances. I also kept local development simple with env-gated single-node mode and added reconnect backoff, logging, and graceful shutdown for safer operations.
 
 ## 12. What this does not solve yet
 
@@ -190,7 +190,7 @@ Redis scaling improves event delivery across instances.
 
 It does not automatically solve:
 
-- CRDT conflict resolution
+- Yjs awareness-based presence
 - version history
 - containerized deployment
 - Kubernetes orchestration

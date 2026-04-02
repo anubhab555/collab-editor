@@ -10,6 +10,14 @@ const documentSchema = new Schema(
             type: Schema.Types.Mixed,
             default: "",
         },
+        yjsState: {
+            type: String,
+            default: null,
+        },
+        contentFormat: {
+            type: String,
+            default: "quill-delta",
+        },
     },
     {
         versionKey: false,

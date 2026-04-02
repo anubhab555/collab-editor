@@ -18,6 +18,7 @@ This project solves that with:
 - React for the UI
 - Quill for the editor
 - Socket.io for real-time events
+- Yjs for shared content sync
 - MongoDB for persistence
 
 ## 2. What is a WebSocket?
@@ -41,7 +42,7 @@ Socket.io is a library built on top of the WebSocket idea.
 
 It gives helpful features like:
 
-- named events such as `send-changes` or `cursor-update`
+- named events such as `yjs-update` or `cursor-update`
 - rooms, so one document's users do not receive another document's events
 - reconnect behavior
 - a simpler developer experience
@@ -86,21 +87,21 @@ This is useful because:
 
 ## 6. Is the current app already OT or CRDT?
 
-Not fully.
+Partly yes.
 
-This is an important interview point.
+This is the honest interview answer:
 
-The current app uses delta-based synchronization, but it is not yet a full conflict-resolution engine like a CRDT system.
+- document content is now CRDT-based through Yjs
+- Socket.io is still the transport layer
+- cursor and presence state are still handled separately through custom socket events
+- cursor positions still use transform logic because presence is not yet moved to Yjs awareness
 
-A truthful explanation is:
+So the current system is not "fully Yjs for everything."
+It is a hybrid design:
 
-- Quill Deltas are the change format
-- Socket.io is the transport
-- remote clients apply incoming deltas
-- cursor positions are transformed to reduce drift
-- full CRDT collaboration is still planned through Yjs
-
-This answer is much better than pretending the app already solves every merge conflict perfectly.
+- Yjs for content correctness
+- Socket.io room events for transport
+- custom cursor logic for live presence
 
 ## 7. Why do cursors drift?
 
@@ -143,7 +144,7 @@ Persistence means:
 
 - the document still exists after refresh or reconnect
 
-That is why the app also sends `save-document` every 2 seconds and stores the content in MongoDB.
+That is why the app also sends `save-document` every 2 seconds and stores a Yjs snapshot plus a Quill delta mirror in MongoDB.
 
 ## 10. Where these concepts live in this project
 
@@ -156,7 +157,7 @@ That is why the app also sends `save-document` every 2 seconds and stores the co
 
 You can say:
 
-> I built the editor on top of Quill and Socket.io. Quill gives me delta-based edit operations, and Socket.io gives me persistent real-time communication with room-based broadcasting. I also added cursor tracking with delta-aware position updates so remote cursors stay visually aligned as users type.
+> I built the editor on top of React, Quill, Socket.io, and Yjs. Quill provides the editing UI, Yjs provides CRDT-based content convergence, Socket.io handles room-based realtime transport, and a custom cursor layer keeps remote carets live with delta-aware position updates.
 
 ## 12. What to learn next
 

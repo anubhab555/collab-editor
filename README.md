@@ -44,10 +44,17 @@ If you want to start with a clean local database:
 4. `cd frontend && npm start`
 
 ## Features
-* Real-time collaborative editing with Quill deltas over Socket.io
+* Yjs-based CRDT content sync over Socket.io
 * Live remote cursor tracking with browser-persisted collaborator names
 * Delta-aware cursor drift correction while users type concurrently
 * MongoDB-backed document persistence with periodic autosave
+
+## Content Sync Events
+* `load-document`: receive the Yjs baseline payload for the active document
+* `yjs-update`: send or receive CRDT updates for document content
+* `request-document-sync`: request a live Yjs catch-up snapshot from existing peers
+* `document-sync`: receive the first valid peer snapshot for a newly joined client
+* `save-document`: persist a Yjs snapshot plus a Quill delta mirror
 
 ## Cursor Tracking Events
 * `join-document`: register collaborator metadata for the active document room
@@ -64,11 +71,14 @@ If you want to start with a clean local database:
 ## Manual Test Flow
 1. Make sure MongoDB is available through your normal local flow.
 2. Open the same document in two tabs and verify text sync works live.
-3. Open a different document in a third tab and verify it stays isolated.
-4. Type, wait 2 seconds, refresh, and verify autosave restores the content.
-5. Open the same document in two different browser storage contexts and verify remote cursors and labels appear.
-6. Blur one editor, close one tab, or switch one tab to a different document and verify the remote cursor disappears.
-7. After Redis is running locally, use the multi-instance flow below to verify cross-backend sync.
+3. Type concurrently in both tabs and verify the document converges cleanly instead of drifting.
+4. Open a different document in a third tab and verify it stays isolated.
+5. Type, wait 2 seconds, refresh, and verify autosave restores the content.
+6. Open the same document in two different browser storage contexts and verify remote cursors and labels appear.
+7. Blur one editor, close one tab, or switch one tab to a different document and verify the remote cursor disappears.
+8. Join a third client after active edits but before the next autosave and verify it catches up to the latest in-memory state.
+9. If you already have older documents saved before the Yjs migration, reopen one and verify it still loads and resaves correctly.
+10. After Redis is running locally, use the multi-instance flow below to verify cross-backend sync.
 
 ## Redis Scaling
 * Set `REDIS_URL=redis://localhost:6379` to enable the Socket.io Redis adapter.
@@ -105,9 +115,10 @@ This mode still supports:
 3. Start backend instance 2: `cd backend && npm run devStart:redis:3002`
 4. Start frontend instance 1: `cd frontend && npm start`
 5. Start frontend instance 2: `cd frontend && npm run start:socket3002`
-6. Open the same document in both frontends and verify text sync, cursor sync, and document persistence across backend instances.
-7. Open a different document in one frontend and verify document isolation still holds.
-8. Stop Redis with `docker stop collab-redis` and confirm `npm run devStart:redis` fails loudly instead of silently falling back.
+6. Open the same document in both frontends and verify text sync, concurrent typing convergence, cursor sync, and document persistence across backend instances.
+7. Join a third client after active edits but before autosave and verify peer catch-up still brings it to the latest state.
+8. Open a different document in one frontend and verify document isolation still holds.
+9. Stop Redis with `docker stop collab-redis` and confirm `npm run devStart:redis` fails loudly instead of silently falling back.
 
 Notes:
 
@@ -127,4 +138,5 @@ Notes:
 * Architecture overview: `docs/ARCHITECTURE.md`
 * Change history and interview notes: `docs/Design Flow.md`
 * Local setup and test runbook: `docs/LOCAL_DEV_SETUP.md`
+* HLD and LLD interview guide: `docs/SYSTEM_DESIGN_INTERVIEW_GUIDE.md`
 * Beginner study guide: `docs/LEARNING_PATH.md`
