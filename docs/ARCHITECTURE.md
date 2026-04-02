@@ -7,8 +7,9 @@ The most important truth to remember is this:
 - Today, document content uses Yjs-based CRDT sync.
 - Today, cursor and presence updates use Yjs awareness over the existing Socket.io transport.
 - Today, the backend can run in single-node mode or Redis-scaled mode.
+- Today, the project also has a Docker Compose full-stack runtime with frontend, backend, MongoDB, and Redis.
 - Today, MongoDB persistence stores a Yjs snapshot, a Quill delta mirror, and timed version checkpoints.
-- The next major upgrades are production packaging and authenticated access control.
+- The next major upgrades are authenticated access control and production-grade observability.
 
 If you want the step-by-step change history, read [Design Flow](./Design%20Flow.md).
 If you want beginner-friendly explanations of the concepts, start with [Learning Path](./LEARNING_PATH.md).
@@ -26,7 +27,8 @@ If you want interview-focused HLD and LLD preparation, read [System Design Inter
 | Horizontal scaling | Socket.io Redis adapter when `REDIS_URL` is set |
 | Persistence | MongoDB with active Yjs snapshot + Quill delta mirror + timed checkpoints |
 | Identity | Browser-persisted `localStorage` identity |
-| Next major upgrade | Docker packaging and authenticated access control |
+| Packaging | Docker Compose full stack with Nginx frontend, Node backend, MongoDB, and Redis |
+| Next major upgrade | Authenticated access control |
 
 ## Current Vs Target Architecture
 
@@ -40,13 +42,13 @@ If you want interview-focused HLD and LLD preparation, read [System Design Inter
 | Persistence | MongoDB active snapshot + timed checkpoints | MongoDB or equivalent persistent store with active state + version history |
 | Recovery | Timed checkpoints + live restore | Richer history, restore, and possibly diff or audit features |
 | Identity | Browser-local identity only | Authenticated users with document-level access control |
-| Deployment | Local scripts + Docker-managed Redis for testing | Dockerized full stack, then optional Kubernetes-ready deployment |
+| Deployment | Local scripts plus Docker Compose full-stack packaging | Dockerized full stack with image publishing and optional Kubernetes-ready deployment |
 | Observability and testing | Automated backend service/socket tests, frontend panel tests, and Playwright browser smoke tests, plus manual Redis verification when needed | Automated unit, integration, and multi-client end-to-end testing with production-style monitoring |
 
 The honest way to describe the gap is:
 
 - today, the collaboration engine and restore flow are real
-- the main missing pieces are deployment packaging, authenticated access, and production-grade observability
+- the main missing pieces are authenticated access, image/deployment automation, and production-grade observability
 - that means the project already demonstrates the core distributed editor design, but is not yet the final production-shaped platform
 
 ## Honest Architecture Summary
@@ -106,16 +108,17 @@ graph TB
 
 ### Runtime modes
 
-There are two valid runtime modes today:
+There are three valid runtime modes today:
 
 | Mode | When used | Behavior |
 |------|-----------|----------|
 | Single-node mode | `REDIS_URL` is not set | One backend instance handles all socket events locally |
 | Redis-scaled mode | `REDIS_URL` is set | Multiple backend instances exchange Socket.io events through Redis |
+| Docker Compose mode | `docker compose up` is used | Nginx serves the frontend, proxies Socket.io to the backend, and runs MongoDB plus Redis in one packaged stack |
 
 In production, a load balancer must support sticky sessions or use a WebSocket-aware proxy.
 
-For local Redis verification on this machine, the scaling layer is provided by a Docker-managed Redis container on `localhost:6379`.
+For local Redis verification on this machine, the scaling layer can come from either the standalone Docker-managed Redis container on `localhost:6379` or the Docker Compose stack.
 
 ## Main Components
 
@@ -302,9 +305,9 @@ It is important to explain the limits clearly.
 
 The project is not yet:
 
-- a Dockerized production deployment
 - a Kubernetes deployment
 - an authenticated multi-user collaboration platform
+- a fully automated image publishing and deployment pipeline
 
 Those are still future improvements, not current features.
 
@@ -373,6 +376,21 @@ docker stop collab-redis
 
 Then rerun `npm run devStart:redis` and confirm the backend fails loudly instead of silently falling back.
 Pausing Docker Engine is not the preferred validation because it can freeze the dependency rather than simulate a clean Redis outage.
+
+### Docker Compose mode
+
+```bash
+npm run docker:up
+```
+
+Open `http://localhost:3000` and verify:
+
+- content sync
+- awareness roster and cursor sync
+- history and restore
+- persistence across stack restarts
+
+Use `npm run docker:down` to stop the stack and `npm run docker:logs` to inspect container logs.
 
 ## Interview One-Liner
 

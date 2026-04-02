@@ -10,7 +10,7 @@ Use this when you want:
 
 ## Startup Modes
 
-There are two normal ways to run the project locally.
+There are three normal ways to run the project locally.
 
 ### 1. Single-node mode
 
@@ -52,6 +52,24 @@ What you get:
 - presence roster and cursor sync across backend instances
 - version history updates across backend instances
 - proof that Socket.io events propagate through Redis pub/sub
+
+### 3. Docker Compose mode
+
+Use this when you want the packaged full stack instead of separate local processes.
+
+What runs:
+
+1. frontend container on `:3000`
+2. backend container on `:3001`
+3. MongoDB container
+4. Redis container
+
+What you get:
+
+- a production-style startup flow
+- same-origin Socket.io through the Nginx frontend container
+- the current collaboration stack in one packaged runtime
+- a clean path for container-based smoke testing
 
 ## MongoDB
 
@@ -186,6 +204,35 @@ Notes:
 - the backend allows both `http://localhost:3000` and `http://localhost:3003` by default for this flow
 - `localhost:3000` and `localhost:3003` are different origins, so they naturally use different browser storage and appear as different collaborators
 
+### Docker Compose startup
+
+Run these from the repo root:
+
+```bash
+npm run docker:up
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+Useful commands:
+
+```bash
+npm run docker:logs
+npm run docker:down
+```
+
+Notes:
+
+- the Compose stack includes `frontend`, `backend`, `mongodb`, and `redis`
+- the frontend is a production React build served by Nginx
+- Nginx proxies `/socket.io/` to the backend container, so the browser stays on one origin
+- the backend exposes `GET /healthz` for container health checks
+- `docker:down` preserves MongoDB volume data by default
+
 ## Clean Start Flow
 
 ### If you are using the repo-managed fallback MongoDB process
@@ -248,6 +295,7 @@ Current automated coverage includes:
 - frontend presence-panel and version-history sidebar rendering behavior
 - Playwright single-node browser smoke across two isolated browser contexts
 - Playwright Redis-backed browser smoke across `localhost:3000` and `localhost:3003`
+- Playwright Docker Compose browser smoke through the packaged full stack
 
 ### Browser E2E commands
 
@@ -256,6 +304,7 @@ Run these from the repo root:
 ```bash
 npm run e2e:single
 npm run e2e:redis
+npm run e2e:docker
 npm run e2e
 ```
 
@@ -263,7 +312,8 @@ Notes:
 
 - `e2e:single` starts MongoDB if needed, then boots one backend and one frontend, and runs the Playwright multi-context collaboration smoke test
 - `e2e:redis` starts MongoDB if needed, expects Docker Desktop and the Docker engine to be running, ensures the `collab-redis` container is available, then boots two backends and two frontends before running the cross-backend Playwright smoke test
-- `e2e` runs the single-node suite first and then the Redis-backed suite
+- `e2e:docker` starts the full Docker Compose stack, waits for health checks, runs the browser smoke test through `http://127.0.0.1:3000`, and then tears the stack down
+- `e2e` runs the single-node, Redis-backed, and Docker Compose suites in sequence
 
 ### Single-node checklist
 
@@ -313,9 +363,9 @@ npm run devStart:redis
 
 ## What To Test Next
 
-After the current Yjs validation, the next meaningful improvements are:
+After the Docker packaging phase, the next meaningful improvements are:
 
-- Dockerized packaging for frontend, backend, Redis, and MongoDB
 - authenticated user identity and document-level access control
+- production-grade observability and deployment automation
 
 That keeps the roadmap focused on production packaging and real user identity now that transport scaling, CRDT content sync, awareness-based presence, and restoreable history are already in place.

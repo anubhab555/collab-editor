@@ -9,6 +9,8 @@ const PORT = Number(process.env.SOCKET_PORT) || 3001
 const DEFAULT_CLIENT_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:3003",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3003",
 ]
 
 function getAllowedClientOrigins() {
@@ -59,11 +61,33 @@ function registerGracefulShutdown(httpServer, cleanupRedis) {
     })
 }
 
+function createHttpRequestHandler() {
+    return (request, response) => {
+        if (request.url === "/healthz") {
+            response.writeHead(200, {
+                "Content-Type": "application/json",
+            })
+            response.end(JSON.stringify({ status: "ok" }))
+            return
+        }
+
+        // Socket.IO handles its own transport paths on the shared HTTP server.
+        if (request.url?.startsWith("/socket.io/")) {
+            return
+        }
+
+        response.writeHead(404, {
+            "Content-Type": "text/plain",
+        })
+        response.end("Not found")
+    }
+}
+
 async function startServer() {
     await connectToDatabase()
     const allowedClientOrigins = getAllowedClientOrigins()
 
-    const httpServer = http.createServer()
+    const httpServer = http.createServer(createHttpRequestHandler())
     const io = new Server(httpServer, {
         cors: {
             origin: allowedClientOrigins,

@@ -16,7 +16,6 @@ import VersionHistoryPanel from "./VersionHistoryPanel"
 const SAVE_INTERVAL_MS = Number(process.env.REACT_APP_SAVE_INTERVAL_MS) || 2000
 const AWARENESS_HEARTBEAT_INTERVAL_MS = 4000
 const CURSOR_EMIT_INTERVAL_MS = 75
-const SOCKET_SERVER_URL = process.env.REACT_APP_SOCKET_URL || "http://localhost:3001"
 const TOOLBAR_OPTIONS = [
     [{ header: [1, 2, 3, 4, 5, 6, false] }],
     [{ font: [] }],
@@ -48,6 +47,24 @@ const YJS_PEER_SYNC_ORIGIN = Symbol("yjs-peer-sync-origin")
 const YJS_AWARENESS_REMOTE_ORIGIN = Symbol("yjs-awareness-remote-origin")
 
 let collaboratorCache
+
+function getSocketServerUrl() {
+    if (process.env.REACT_APP_SOCKET_URL) {
+        return process.env.REACT_APP_SOCKET_URL
+    }
+
+    if (process.env.NODE_ENV === "development") {
+        return "http://localhost:3001"
+    }
+
+    if (typeof window !== "undefined") {
+        return window.location.origin
+    }
+
+    return "http://localhost:3001"
+}
+
+const SOCKET_SERVER_URL = getSocketServerUrl()
 
 function getStableHash(value) {
     let hash = 0

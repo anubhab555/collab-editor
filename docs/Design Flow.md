@@ -21,6 +21,30 @@ Use these docs when you want to study the concepts, not just the change log:
 - [CRDT and Yjs 101](./CRDT_YJS_101.md)
 - [Docker and Kubernetes 101](./DOCKER_KUBERNETES_101.md)
 
+## 2026-04-02 - Docker packaging
+Status: Implemented
+
+What changed:
+- Added production-style Docker packaging for the full stack with a backend container, frontend Nginx container, MongoDB, and Redis.
+- Added a Compose runtime so the packaged system starts with one command instead of separate local processes.
+- Added same-origin Socket.io support in production mode by serving the React build through Nginx and proxying `/socket.io/` to the backend.
+- Added a backend `GET /healthz` endpoint and container health checks for the Compose stack.
+- Extended the E2E harness with a Docker Compose browser smoke test that runs through the packaged stack.
+
+Why it changed:
+- The collaboration engine was already strong, but the project still lacked a clean deployment and packaging story.
+- Docker packaging makes the project easier to run, demo, and explain as a production-shaped system instead of a collection of local scripts.
+
+Interview explanation:
+- I packaged the frontend, backend, MongoDB, and Redis into a production-style Docker Compose stack so the system can run consistently outside the local dev workflow.
+- I kept the browser on one origin by serving the React build through Nginx and proxying Socket.io to the backend, which is closer to a real deployment setup than two separate dev servers.
+
+Learning docs for this phase:
+
+- [Architecture](./ARCHITECTURE.md)
+- [Local Dev Setup](./LOCAL_DEV_SETUP.md)
+- [Docker and Kubernetes 101](./DOCKER_KUBERNETES_101.md)
+
 ## 2026-03-17 - Backend modularization
 Status: Implemented
 
