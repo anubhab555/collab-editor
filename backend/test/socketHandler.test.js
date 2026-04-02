@@ -390,7 +390,6 @@ test("awareness updates relay to peers and awareness-leave removes stale presenc
 
     clientA.emit("awareness-leave", {
         documentId: "doc-1",
-        awarenessClientIds: [42],
     })
 
     const removalPayload = await awarenessRemoval

@@ -329,12 +329,8 @@ export default function TextEditor() {
     const leaveAwarenessSession = useCallback((session) => {
         if (socket == null || !session) return
 
-        const awarenessClientIds = normalizeAwarenessClientIds([session.awareness.clientID])
-        if (awarenessClientIds.length === 0) return
-
         socket.emit("awareness-leave", {
             documentId: session.documentId,
-            awarenessClientIds,
         })
     }, [socket])
 

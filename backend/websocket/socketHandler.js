@@ -309,11 +309,6 @@ function createSocketHandler({
                 )
 
                 if (!fulfilledLocally) {
-                    io.to(targetSocketId).emit("awareness-update", {
-                        documentId,
-                        update: normalizedUpdate,
-                    })
-
                     io.serverSideEmit("resolve-awareness-sync", {
                         documentId,
                         requestId,
@@ -323,19 +318,16 @@ function createSocketHandler({
                 }
             })
 
-            socket.on("awareness-leave", ({ documentId, awarenessClientIds } = {}) => {
+            socket.on("awareness-leave", ({ documentId } = {}) => {
                 if (!documentId || socket.data.documentId !== documentId) return
 
+                const ownAwarenessClientId = socket.data.awarenessClientId
                 const normalizedClientIds = normalizeAwarenessClientIds(
-                    awarenessClientIds?.length > 0
-                        ? awarenessClientIds
-                        : [socket.data.awarenessClientId]
+                    ownAwarenessClientId ? [ownAwarenessClientId] : []
                 )
                 if (normalizedClientIds.length === 0) return
 
-                if (normalizedClientIds.includes(socket.data.awarenessClientId)) {
-                    socket.data.awarenessClientId = null
-                }
+                socket.data.awarenessClientId = null
 
                 emitAwarenessRemoval(socket, documentId, normalizedClientIds)
             })
