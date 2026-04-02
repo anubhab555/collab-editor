@@ -45,8 +45,8 @@ If you want to start with a clean local database:
 
 ## Features
 * Yjs-based CRDT content sync over Socket.io
-* Live remote cursor tracking with browser-persisted collaborator names
-* Delta-aware cursor drift correction while users type concurrently
+* Yjs awareness-based live cursor sync and active collaborator roster
+* Delta-aware remote cursor drift correction while users type concurrently
 * MongoDB-backed document persistence with periodic autosave
 * Timed version checkpoints with live restore for all active collaborators
 
@@ -64,16 +64,18 @@ If you want to start with a clean local database:
 * `restore-version`: request a live restore for the selected version
 * `document-restored`: receive the restored Yjs snapshot for the active room
 
-## Cursor Tracking Events
+## Presence Events
 * `join-document`: register collaborator metadata for the active document room
-* `cursor-move`: send throttled caret updates for the current collaborator
-* `cursor-update`: receive remote collaborator cursor positions
-* `cursor-remove`: remove remote cursors when collaborators blur, switch documents, or disconnect
+* `awareness-update`: send or receive Yjs awareness updates for cursors and live presence
+* `request-awareness-sync`: request an awareness snapshot from active peers when a collaborator joins
+* `awareness-sync`: send the current awareness snapshot back to the requesting collaborator
+* `awareness-remove`: remove stale awareness states when collaborators leave, switch documents, or disconnect
+* `awareness-leave`: explicitly clear the current session's ephemeral presence before teardown
 
 ## Identity and Scaling Notes
 * User identity is persisted via `localStorage`, so the same browser session shares identity across tabs and documents.
 * Two normal tabs in the same browser profile will usually look like the same collaborator, so they are not the right way to test "different users".
-* To test different remote cursors, open the same document in two different browser storage contexts such as normal window + incognito, two browser profiles, or two different browsers.
+* To test different collaborator presence and remote cursors, open the same document in two different browser storage contexts such as normal window + incognito, two browser profiles, or two different browsers.
 * In production, a load balancer must support sticky sessions or use a WebSocket-aware proxy.
 
 ## Manual Test Flow
@@ -82,14 +84,15 @@ If you want to start with a clean local database:
 3. Type concurrently in both tabs and verify the document converges cleanly instead of drifting.
 4. Open a different document in a third tab and verify it stays isolated.
 5. Type, wait 2 seconds, refresh, and verify autosave restores the content.
-6. Open the same document in two different browser storage contexts and verify remote cursors and labels appear.
-7. Blur one editor, close one tab, or switch one tab to a different document and verify the remote cursor disappears.
-8. Join a third client after active edits but before the next autosave and verify it catches up to the latest in-memory state.
-9. Keep editing for more than 30 seconds and verify a checkpoint appears in the history panel.
-10. Restore an older version and verify every open client on the same document updates immediately.
-11. Refresh after restore and verify the restored content persists.
-12. If you already have older documents saved before the Yjs migration, reopen one and verify it still loads, resaves, and starts accumulating history correctly.
-13. After Redis is running locally, use the multi-instance flow below to verify cross-backend sync.
+6. Open the same document in two different browser storage contexts and verify both names appear in the active-collaborators roster.
+7. Move the caret in one editor and verify the other client shows the remote cursor label.
+8. Blur one editor, close one tab, or switch one tab to a different document and verify the remote cursor disappears and the roster updates.
+9. Join a third client after active edits but before the next autosave and verify it catches up to the latest in-memory state.
+10. Keep editing for more than 30 seconds and verify a checkpoint appears in the history panel.
+11. Restore an older version and verify every open client on the same document updates immediately.
+12. Refresh after restore and verify the restored content persists.
+13. If you already have older documents saved before the Yjs migration, reopen one and verify it still loads, resaves, and starts accumulating history correctly.
+14. After Redis is running locally, use the multi-instance flow below to verify cross-backend sync.
 
 ## Automated Testing
 Use the automated harness for fast feedback before running browser smoke tests:
@@ -105,7 +108,7 @@ Current automated coverage includes:
 * checkpoint creation and retention rules
 * restore-backup behavior
 * history fetch and room-wide restore socket events
-* version-history sidebar rendering and restore button behavior
+* presence-roster rendering and version-history sidebar behavior
 * real browser multi-context collaboration smoke in single-node mode
 * Redis-backed cross-backend browser smoke when Docker Desktop and the engine are running
 
@@ -133,7 +136,7 @@ Use this when you want the app to run without the scaling layer:
 This mode still supports:
 
 * document editing
-* cursor tracking
+* awareness-based presence and remote cursors
 * autosave and reload
 
 ## Multi-Instance Local Verification
@@ -144,7 +147,7 @@ This mode still supports:
 3. Start backend instance 2: `cd backend && npm run devStart:redis:3002`
 4. Start frontend instance 1: `cd frontend && npm start`
 5. Start frontend instance 2: `cd frontend && npm run start:socket3002`
-6. Open the same document in both frontends and verify text sync, concurrent typing convergence, cursor sync, and document persistence across backend instances.
+6. Open the same document in both frontends and verify text sync, concurrent typing convergence, active-user roster sync, cursor sync, and document persistence across backend instances.
 7. Keep editing for more than 30 seconds and verify the history list updates across both frontend instances.
 8. Restore a version from one frontend and verify the other frontend receives both the restored content and updated history list.
 9. Join a third client after active edits but before autosave and verify peer catch-up still brings it to the latest state.

@@ -283,3 +283,117 @@ test("restore-version broadcasts restored content and refreshed history to the r
     assert.equal(restoreCalls.length, 1)
     assert.equal(restoreCalls[0].payload.savedBy.displayName, "Anubhab")
 })
+
+test("join-document requests awareness sync and forwards the first awareness snapshot to the joining client", async (context) => {
+    const harness = await createHarness()
+
+    const clientA = await connectClient(harness.port)
+    const clientB = await connectClient(harness.port)
+
+    context.after(async () => {
+        await closeClient(clientA)
+        await closeClient(clientB)
+        await harness.io.close()
+        await new Promise((resolve) => harness.httpServer.close(resolve))
+    })
+
+    clientA.emit("get-document", "doc-1")
+    await waitForEvent(clientA, "load-document")
+    clientA.emit("join-document", {
+        documentId: "doc-1",
+        user: {
+            clientId: "user-1",
+            displayName: "Alice",
+            color: "#1864ab",
+        },
+    })
+
+    clientB.emit("get-document", "doc-1")
+    await waitForEvent(clientB, "load-document")
+
+    const awarenessSyncRequest = waitForEvent(clientA, "request-awareness-sync")
+    clientB.emit("join-document", {
+        documentId: "doc-1",
+        user: {
+            clientId: "user-2",
+            displayName: "Bob",
+            color: "#d9480f",
+        },
+    })
+
+    const request = await awarenessSyncRequest
+    const update = Uint8Array.from([1, 4, 9, 16])
+    const awarenessUpdate = waitForEvent(clientB, "awareness-update")
+
+    clientA.emit("awareness-sync", {
+        documentId: "doc-1",
+        requestId: request.requestId,
+        targetSocketId: request.targetSocketId,
+        update,
+    })
+
+    const forwardedUpdate = await awarenessUpdate
+
+    assert.equal(forwardedUpdate.documentId, "doc-1")
+    assert.deepEqual(Array.from(forwardedUpdate.update), Array.from(update))
+})
+
+test("awareness updates relay to peers and awareness-leave removes stale presence", async (context) => {
+    const harness = await createHarness()
+
+    const clientA = await connectClient(harness.port)
+    const clientB = await connectClient(harness.port)
+
+    context.after(async () => {
+        await closeClient(clientA)
+        await closeClient(clientB)
+        await harness.io.close()
+        await new Promise((resolve) => harness.httpServer.close(resolve))
+    })
+
+    clientA.emit("get-document", "doc-1")
+    await waitForEvent(clientA, "load-document")
+    clientA.emit("join-document", {
+        documentId: "doc-1",
+        user: {
+            clientId: "user-1",
+            displayName: "Alice",
+            color: "#1864ab",
+        },
+    })
+
+    clientB.emit("get-document", "doc-1")
+    await waitForEvent(clientB, "load-document")
+    clientB.emit("join-document", {
+        documentId: "doc-1",
+        user: {
+            clientId: "user-2",
+            displayName: "Bob",
+            color: "#d9480f",
+        },
+    })
+
+    const update = Uint8Array.from([7, 8, 9])
+    const relayedAwarenessUpdate = waitForEvent(clientB, "awareness-update")
+
+    clientA.emit("awareness-update", {
+        awarenessClientId: 42,
+        documentId: "doc-1",
+        update,
+    })
+
+    const awarenessPayload = await relayedAwarenessUpdate
+    assert.equal(awarenessPayload.documentId, "doc-1")
+    assert.deepEqual(Array.from(awarenessPayload.update), Array.from(update))
+
+    const awarenessRemoval = waitForEvent(clientB, "awareness-remove")
+
+    clientA.emit("awareness-leave", {
+        documentId: "doc-1",
+        awarenessClientIds: [42],
+    })
+
+    const removalPayload = await awarenessRemoval
+    assert.equal(removalPayload.documentId, "doc-1")
+    assert.deepEqual(removalPayload.awarenessClientIds, [42])
+})

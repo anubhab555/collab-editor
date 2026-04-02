@@ -140,6 +140,30 @@ Learning docs for this phase:
 - [Local Dev Setup](./LOCAL_DEV_SETUP.md)
 - [Architecture](./ARCHITECTURE.md)
 
+## 2026-04-02 - Yjs awareness presence
+Status: Implemented
+
+What changed:
+- Replaced the custom cursor socket channel with Yjs awareness updates carried over the existing Socket.io transport.
+- Added a lightweight active-collaborators roster above version history in the editor sidebar.
+- Kept `CursorManager`, but repointed it to awareness-derived collaborator state instead of custom cursor events.
+- Added awareness peer-sync and cleanup flows so join, restore, document switch, blur, and disconnect all keep presence state clean.
+- Extended automated coverage to include awareness relay, roster rendering, and browser-level presence behavior in both single-node and Redis-scaled modes.
+
+Why it changed:
+- Content had already moved to Yjs, so keeping presence on a separate custom channel left the collaboration model split in two.
+- Moving presence to awareness makes the system easier to explain, closer to how mature collaborative editors are structured, and safer to evolve.
+
+Interview explanation:
+- I unified collaboration state around Yjs by keeping document content in the shared document and moving ephemeral user state like cursor position and active presence into Yjs awareness.
+- I still kept a dedicated cursor renderer because awareness solves shared ephemeral state, but the DOM-heavy cursor painting path benefits from an imperative manager and local drift correction.
+
+Learning docs for this phase:
+
+- [Architecture](./ARCHITECTURE.md)
+- [CRDT and Yjs 101](./CRDT_YJS_101.md)
+- [System Design Interview Guide](./SYSTEM_DESIGN_INTERVIEW_GUIDE.md)
+
 ## 2026-03-21 - Yjs CRDT content sync
 Status: Implemented
 

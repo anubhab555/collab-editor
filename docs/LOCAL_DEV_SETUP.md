@@ -25,7 +25,7 @@ What runs:
 What you get:
 
 - real-time editing
-- remote cursors
+- active-user roster and remote cursors
 - autosave and reload
 - version checkpoints and live restore
 
@@ -49,7 +49,7 @@ What runs:
 What you get:
 
 - text sync across backend instances
-- cursor sync across backend instances
+- presence roster and cursor sync across backend instances
 - version history updates across backend instances
 - proof that Socket.io events propagate through Redis pub/sub
 
@@ -211,13 +211,13 @@ Instead:
 
 ## Collaborator Identity Note
 
-The current cursor system stores collaborator identity in `localStorage`.
+The current presence system stores collaborator identity in `localStorage`.
 
 That means:
 
 - the same browser profile reuses the same `clientId`
 - normal tabs in the same browser often look like the same user
-- remote cursor updates for your own `clientId` are intentionally ignored
+- remote cursor rendering for your own `clientId` is intentionally ignored
 
 If you want to test different collaborators in single-node mode, use:
 
@@ -244,8 +244,8 @@ npm run test:ci
 Current automated coverage includes:
 
 - backend document-service rules for checkpoints, retention, and restore backups
-- backend socket integration for history fetch, history update broadcast, and live restore broadcast
-- frontend version-history sidebar rendering and restore-button behavior
+- backend socket integration for history fetch, awareness relay, awareness cleanup, and live restore broadcast
+- frontend presence-panel and version-history sidebar rendering behavior
 - Playwright single-node browser smoke across two isolated browser contexts
 - Playwright Redis-backed browser smoke across `localhost:3000` and `localhost:3003`
 
@@ -272,9 +272,9 @@ Notes:
 3. Type concurrently in both tabs and verify the document converges cleanly.
 4. Open a different document in a third tab and verify it stays isolated.
 5. Type in a document, wait 2 seconds, refresh, and verify the document reloads from MongoDB.
-6. Open the same document in two different browser storage contexts and verify remote cursors appear.
-7. Move the caret, type before another user's caret, and verify cursor drift correction looks reasonable.
-8. Blur one editor, close one tab, or switch one tab to another document and verify the old cursor disappears.
+6. Open the same document in two different browser storage contexts and verify both names appear in the active-collaborators roster.
+7. Move the caret, type before another user's caret, and verify the remote cursor label appears and cursor drift correction looks reasonable.
+8. Blur one editor, close one tab, or switch one tab to another document and verify the old cursor disappears and the roster updates.
 9. Join a third client after active edits but before autosave and verify it catches up to the latest in-memory state.
 10. Keep editing for more than 30 seconds and verify a checkpoint appears in the history panel.
 11. Restore an older version and verify the document updates immediately without a page refresh.
@@ -287,7 +287,7 @@ Notes:
 2. Open the same document in `localhost:3000` and `localhost:3003`.
 3. Verify text sync works across backend instances.
 4. Type concurrently in both frontends and verify the document converges correctly across backends.
-5. Verify cursor sync works across backend instances.
+5. Verify the active-collaborators roster and cursor sync both work across backend instances.
 6. Keep editing for more than 30 seconds and verify the history panel updates across both frontend instances.
 7. Restore a version from one frontend and verify the second frontend updates immediately.
 8. Join a third client after active edits but before autosave and verify peer catch-up still works.
@@ -315,7 +315,7 @@ npm run devStart:redis
 
 After the current Yjs validation, the next meaningful improvements are:
 
-- moving presence and cursor state toward Yjs awareness
 - Dockerized packaging for frontend, backend, Redis, and MongoDB
+- authenticated user identity and document-level access control
 
-That keeps the roadmap focused on presence correctness and production packaging now that transport scaling, CRDT content sync, and restoreable history are already in place.
+That keeps the roadmap focused on production packaging and real user identity now that transport scaling, CRDT content sync, awareness-based presence, and restoreable history are already in place.
