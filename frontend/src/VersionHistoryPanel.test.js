@@ -99,6 +99,9 @@ describe("VersionHistoryPanel", () => {
                     {
                         versionId: "version-2",
                         createdAt: "2026-04-02T12:34:56.000Z",
+                        savedBy: {
+                            displayName: "Anubhab",
+                        },
                         source: "checkpoint",
                     },
                 ]}
@@ -107,6 +110,7 @@ describe("VersionHistoryPanel", () => {
         )
 
         expect(screen.getByText("Guest")).toBeInTheDocument()
+        expect(screen.getByText("Anubhab")).toBeInTheDocument()
         expect(screen.getByText("Unknown time")).toBeInTheDocument()
         expect(screen.getByText("manual-import")).toBeInTheDocument()
         expect(screen.getByTestId("history-restore-version-2")).toBeDisabled()
