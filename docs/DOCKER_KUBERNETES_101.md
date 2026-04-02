@@ -1,6 +1,6 @@
 # Docker and Kubernetes 101
 
-This document explains the deployment concepts that are not implemented yet but are important for the future versions of the project.
+This document explains the deployment concepts around the Docker packaging that now exists in the project, and where Kubernetes would fit later.
 
 ## 1. What is Docker?
 
@@ -18,9 +18,9 @@ With Docker, you define:
 
 so the app can run more consistently across environments.
 
-## 2. What would Docker add to this project?
+## 2. What Docker adds to this project
 
-For this project, Docker would make it easier to run:
+For this project, Docker now makes it easier to run:
 
 - frontend
 - backend
@@ -29,20 +29,20 @@ For this project, Docker would make it easier to run:
 
 together in a repeatable way.
 
-That is why Docker Compose is often the next step after local scripts.
+The project now includes a Docker Compose stack for that full runtime.
 
 ## 3. What is Docker Compose?
 
 Docker Compose lets you define multiple services in one file.
 
-For this project, a future `docker-compose.yml` might define:
+For this project, `docker-compose.yml` now defines:
 
 - `frontend`
 - `backend`
 - `redis`
 - `mongodb`
 
-Then a single command can start the whole stack.
+So a single command can start the whole stack.
 
 ## 4. What is Kubernetes?
 
@@ -120,7 +120,7 @@ So the natural order is:
 
 You can say:
 
-> The current focus was building the real-time collaboration engine and then scaling it across backend instances with Redis. The next deployment steps are Docker for reproducible local and production packaging, and Kubernetes for orchestration once the services are containerized and need to run in a more production-style environment.
+> I first built the real-time collaboration engine and scaled it across backend instances with Redis. After that, I packaged the full stack with Docker Compose so frontend, backend, MongoDB, and Redis can run together consistently. The next step after that would be orchestration and deployment automation, which is where Kubernetes becomes relevant.
 
 That is a clear and honest answer.
 
@@ -132,5 +132,6 @@ Some production ideas already exist in the project:
 - graceful shutdown
 - explicit runtime logging
 - separation between transport, scaling, and persistence concerns
+- Dockerized full-stack packaging with health checks
 
-That means the project is already moving in the right direction even before full containerization.
+That means the project has already crossed from local-script development into containerized packaging, even though it is not yet a full Kubernetes-managed platform.

@@ -1,8 +1,9 @@
 # Collab Editor
 
 ## Setup
-1. `cd backend && npm install`
-2. `cd frontend && npm install`
+1. `npm install`
+2. `cd backend && npm install`
+3. `cd frontend && npm install`
 
 ## Local MongoDB Workflow
 Use the root helper scripts for local development:
@@ -30,6 +31,28 @@ Notes:
 2. Run backend: `cd backend && npm run devStart`
 3. Run frontend: `cd frontend && npm start`
 
+## Docker Compose
+Use this when you want the packaged full stack instead of separate local processes.
+
+1. Make sure Docker Desktop and the Docker engine are running.
+2. Start the stack: `npm run docker:up`
+3. Open `http://localhost:3000`
+4. Follow logs if needed: `npm run docker:logs`
+5. Stop the stack: `npm run docker:down`
+
+What runs in this mode:
+
+* `frontend`: production React build served by Nginx
+* `backend`: Node.js Socket.io server
+* `mongodb`: persistent document store
+* `redis`: realtime scaling layer
+
+Notes:
+
+* The frontend uses same-origin Socket.io in Docker mode, so Nginx proxies `/socket.io/` to the backend container.
+* The backend also exposes `GET /healthz` for container health checks.
+* `npm run docker:down` keeps MongoDB data by default because the Compose volume is preserved.
+
 ## Fresh Start
 If you want to start with a clean local database:
 
@@ -49,6 +72,7 @@ If you want to start with a clean local database:
 * Delta-aware remote cursor drift correction while users type concurrently
 * MongoDB-backed document persistence with periodic autosave
 * Timed version checkpoints with live restore for all active collaborators
+* Production-style Docker Compose packaging for the full stack
 
 ## Content Sync Events
 * `load-document`: receive the Yjs baseline payload for the active document
@@ -102,6 +126,7 @@ Use the automated harness for fast feedback before running browser smoke tests:
 * Combined unit/integration run from the repo root: `npm test`
 * Single-node browser E2E smoke: `npm run e2e:single`
 * Redis-backed browser E2E smoke: `npm run e2e:redis`
+* Docker Compose browser E2E smoke: `npm run e2e:docker`
 
 Current automated coverage includes:
 
@@ -111,6 +136,7 @@ Current automated coverage includes:
 * presence-roster rendering and version-history sidebar behavior
 * real browser multi-context collaboration smoke in single-node mode
 * Redis-backed cross-backend browser smoke when Docker Desktop and the engine are running
+* Docker Compose full-stack browser smoke through the packaged Nginx + backend stack
 
 ## Redis Scaling
 * Set `REDIS_URL=redis://localhost:6379` to enable the Socket.io Redis adapter.
@@ -165,8 +191,10 @@ Notes:
   * `CLIENT_ORIGIN`: comma-separated frontend origins for Socket.io CORS
   * `MONGODB_URI`: MongoDB connection string
   * `REDIS_URL`: enables Redis pub/sub scaling
+  * `CHECKPOINT_INTERVAL_MS`: override timed version checkpoint cadence
 * Frontend
   * `REACT_APP_SOCKET_URL`: override the Socket.io server URL for local multi-instance verification
+  * `REACT_APP_SAVE_INTERVAL_MS`: override autosave cadence at build time
 
 ## Documentation
 * Architecture overview: `docs/ARCHITECTURE.md`

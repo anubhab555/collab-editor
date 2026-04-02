@@ -27,7 +27,7 @@ Today, this project is best described as:
 Today, it is not yet:
 
 - an authenticated collaboration system
-- a production container orchestration setup
+- a production container orchestration setup beyond Docker Compose
 
 That honesty helps a lot in interviews.
 
@@ -196,14 +196,14 @@ Expected answer:
 Expected answer:
 
 - identity is still browser-local instead of authenticated
-- deployment automation is still limited compared with a full production platform
+- deployment automation is still limited compared with a full production platform, even though the stack is now containerized with Docker Compose
 
 #### How would you scale this further?
 
 Expected answer:
 
 - keep Redis for transport scaling
-- containerize services
+- build on the existing Dockerized stack
 - add authenticated user identity and access control
 - later add orchestrated deployment and observability
 

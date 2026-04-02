@@ -14,6 +14,7 @@ const REACT_SCRIPTS_CLI = path.join(ROOT, "frontend", "node_modules", "react-scr
 const PLAYWRIGHT_CHANNEL = process.env.PLAYWRIGHT_BROWSER_CHANNEL || "msedge"
 const CHECKPOINT_INTERVAL_MS = process.env.E2E_CHECKPOINT_INTERVAL_MS || "1500"
 const SAVE_INTERVAL_MS = process.env.E2E_SAVE_INTERVAL_MS || "500"
+const DOCKER_E2E_PROJECT_NAME = "collab-editor-e2e"
 
 function log(message) {
     console.log(`[e2e] ${message}`)
@@ -208,6 +209,46 @@ async function ensureRedis() {
     }
 }
 
+async function startDockerStack() {
+    log("Starting Docker Compose stack for full-stack E2E")
+
+    const composeEnvironment = {
+        ...process.env,
+        CHECKPOINT_INTERVAL_MS,
+        CLIENT_ORIGIN: "http://localhost:3000,http://127.0.0.1:3000",
+        COMPOSE_PROJECT_NAME: DOCKER_E2E_PROJECT_NAME,
+        MONGODB_DB_NAME: "collab-editor-e2e-docker",
+        REACT_APP_SAVE_INTERVAL_MS: SAVE_INTERVAL_MS,
+    }
+
+    await runCommand("docker", ["compose", "-p", DOCKER_E2E_PROJECT_NAME, "up", "-d", "--build"], {
+        env: composeEnvironment,
+    }).catch((error) => {
+        throw new Error(
+            `Docker-backed E2E requires Docker Desktop with the engine running.\n${error.message}`
+        )
+    })
+
+    await waitForTcp(3001)
+    await waitForHttp("http://127.0.0.1:3001/healthz")
+    await waitForHttp("http://127.0.0.1:3000")
+
+    return {
+        async cleanup() {
+            log("Stopping Docker Compose stack")
+
+            await runCommand("docker", [
+                "compose",
+                "-p",
+                DOCKER_E2E_PROJECT_NAME,
+                "down",
+                "-v",
+                "--remove-orphans",
+            ]).catch(() => {})
+        },
+    }
+}
+
 async function startBackend({ name, port, mongoDbName, redisUrl, clientOrigins }) {
     const env = {
         ...process.env,
@@ -349,6 +390,17 @@ async function runRedisSuite() {
     }
 }
 
+async function runDockerSuite() {
+    let dockerStack = null
+
+    try {
+        dockerStack = await startDockerStack()
+        await runPlaywright(path.join("e2e", "tests", "single-node.spec.js"))
+    } finally {
+        await dockerStack?.cleanup()
+    }
+}
+
 async function main() {
     const mode = process.argv[2] || "all"
 
@@ -365,6 +417,12 @@ async function main() {
     if (mode === "all") {
         await runSingleNodeSuite()
         await runRedisSuite()
+        await runDockerSuite()
+        return
+    }
+
+    if (mode === "docker") {
+        await runDockerSuite()
         return
     }
 
