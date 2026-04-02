@@ -27,6 +27,7 @@ What you get:
 - real-time editing
 - remote cursors
 - autosave and reload
+- version checkpoints and live restore
 
 What you do not get:
 
@@ -49,6 +50,7 @@ What you get:
 
 - text sync across backend instances
 - cursor sync across backend instances
+- version history updates across backend instances
 - proof that Socket.io events propagate through Redis pub/sub
 
 ## MongoDB
@@ -238,7 +240,10 @@ In Redis-scaled mode, `localhost:3000` and `localhost:3003` already count as dif
 7. Move the caret, type before another user's caret, and verify cursor drift correction looks reasonable.
 8. Blur one editor, close one tab, or switch one tab to another document and verify the old cursor disappears.
 9. Join a third client after active edits but before autosave and verify it catches up to the latest in-memory state.
-10. If you have a document created before the Yjs migration, reopen it and verify it still loads and resaves correctly.
+10. Keep editing for more than 30 seconds and verify a checkpoint appears in the history panel.
+11. Restore an older version and verify the document updates immediately without a page refresh.
+12. Refresh after restore and verify the restored content persists.
+13. If you have a document created before the Yjs migration, reopen it and verify it still loads, resaves, and starts accumulating history correctly.
 
 ### Redis-scaled checklist
 
@@ -247,9 +252,11 @@ In Redis-scaled mode, `localhost:3000` and `localhost:3003` already count as dif
 3. Verify text sync works across backend instances.
 4. Type concurrently in both frontends and verify the document converges correctly across backends.
 5. Verify cursor sync works across backend instances.
-6. Join a third client after active edits but before autosave and verify peer catch-up still works.
-7. Open a different document in one frontend and verify document isolation still holds.
-8. Edit from both frontends, wait 2 seconds, refresh, and verify persistence still works.
+6. Keep editing for more than 30 seconds and verify the history panel updates across both frontend instances.
+7. Restore a version from one frontend and verify the second frontend updates immediately.
+8. Join a third client after active edits but before autosave and verify peer catch-up still works.
+9. Open a different document in one frontend and verify document isolation still holds.
+10. Edit from both frontends, wait 2 seconds, refresh, and verify persistence still works.
 
 ### Redis failure test
 
@@ -272,7 +279,7 @@ npm run devStart:redis
 
 After the current Yjs validation, the next meaningful improvements are:
 
-- version history and restore flow
 - moving presence and cursor state toward Yjs awareness
+- Dockerized packaging for frontend, backend, Redis, and MongoDB
 
-That keeps the roadmap focused on collaboration depth now that transport scaling and CRDT content sync are already in place.
+That keeps the roadmap focused on presence correctness and production packaging now that transport scaling, CRDT content sync, and restoreable history are already in place.

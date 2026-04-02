@@ -162,3 +162,27 @@ Learning docs for this phase:
 - [Architecture](./ARCHITECTURE.md)
 - [CRDT and Yjs 101](./CRDT_YJS_101.md)
 - [System Design Interview Guide](./SYSTEM_DESIGN_INTERVIEW_GUIDE.md)
+
+## 2026-04-02 - Version history and live restore
+Status: Implemented
+
+What changed:
+- Added timed version checkpoints on top of the active Yjs document state.
+- Stored version metadata and snapshots in MongoDB while keeping the current root document state as the live version.
+- Added a basic history sidebar in the editor with timestamps, source labels, and restore actions.
+- Added live restore so every connected collaborator switches to the restored version immediately.
+- Added restore-backup snapshots so the pre-restore state is recoverable.
+
+Why it changed:
+- The project needed recovery and rollback, not just realtime sync.
+- Version history makes the editor feel more product-ready and gives a stronger data-modeling story in interviews.
+
+Interview explanation:
+- I layered restoreable checkpoints on top of the Yjs collaboration model by keeping active state separate from version snapshots in MongoDB.
+- Restore is a live room-wide action, so connected clients rebuild their Yjs session from the restored snapshot instead of relying on a page refresh.
+
+Learning docs for this phase:
+
+- [Architecture](./ARCHITECTURE.md)
+- [Local Dev Setup](./LOCAL_DEV_SETUP.md)
+- [System Design Interview Guide](./SYSTEM_DESIGN_INTERVIEW_GUIDE.md)

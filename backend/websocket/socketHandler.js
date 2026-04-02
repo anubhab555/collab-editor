@@ -1,8 +1,10 @@
 const crypto = require("crypto")
 
 const {
+    loadHistory,
     loadDocument,
     persistDocument,
+    restoreVersion,
 } = require("../controllers/documentController")
 
 const DOCUMENT_SYNC_TIMEOUT_MS = 5000
@@ -88,6 +90,18 @@ function emitCursorRemoval(socket, documentId) {
     })
 }
 
+function emitHistory(socketOrIoTarget, history) {
+    if (!history) return
+
+    socketOrIoTarget.emit("document-history", history)
+}
+
+function emitHistoryUpdate(io, documentId, history) {
+    if (!history || !documentId) return
+
+    io.to(documentId).emit("document-history-updated", history)
+}
+
 function registerSocketHandlers(io) {
     io.on("resolve-document-sync", (payload = {}) => {
         const update = normalizeBinaryUpdate(payload.update)
@@ -145,6 +159,13 @@ function registerSocketHandlers(io) {
             }
         })
 
+        socket.on("get-document-history", async ({ documentId } = {}) => {
+            if (!documentId || socket.data.documentId !== documentId) return
+
+            const history = await loadHistory(documentId)
+            emitHistory(socket, history)
+        })
+
         socket.on("yjs-update", ({ update } = {}) => {
             const { documentId } = socket.data
             if (!documentId) return
@@ -197,9 +218,35 @@ function registerSocketHandlers(io) {
             const { documentId } = socket.data
             if (!documentId) return
 
-            await persistDocument(documentId, {
-                data: payload.data,
-                yjsStateBase64: payload.yjsStateBase64,
+            const result = await persistDocument(documentId, {
+                payload: {
+                    data: payload.data,
+                    yjsStateBase64: payload.yjsStateBase64,
+                },
+                savedBy: socket.data.user,
+            })
+
+            if (result?.historyUpdated) {
+                emitHistoryUpdate(io, documentId, result.history)
+            }
+        })
+
+        socket.on("restore-version", async ({ documentId, versionId } = {}) => {
+            if (!documentId || socket.data.documentId !== documentId || !versionId) return
+
+            const result = await restoreVersion(documentId, {
+                versionId,
+                savedBy: socket.data.user,
+            })
+
+            if (!result) return
+
+            emitHistoryUpdate(io, documentId, result.history)
+            io.to(documentId).emit("document-restored", {
+                documentId,
+                versionId: result.restoredVersionId,
+                restoredBy: result.restoredBy,
+                yjsStateBase64: result.document.yjsStateBase64,
             })
         })
 

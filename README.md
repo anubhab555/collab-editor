@@ -48,6 +48,7 @@ If you want to start with a clean local database:
 * Live remote cursor tracking with browser-persisted collaborator names
 * Delta-aware cursor drift correction while users type concurrently
 * MongoDB-backed document persistence with periodic autosave
+* Timed version checkpoints with live restore for all active collaborators
 
 ## Content Sync Events
 * `load-document`: receive the Yjs baseline payload for the active document
@@ -55,6 +56,13 @@ If you want to start with a clean local database:
 * `request-document-sync`: request a live Yjs catch-up snapshot from existing peers
 * `document-sync`: receive the first valid peer snapshot for a newly joined client
 * `save-document`: persist a Yjs snapshot plus a Quill delta mirror
+
+## Version History Events
+* `get-document-history`: request version metadata for the active document
+* `document-history`: receive the current version list for the sidebar
+* `document-history-updated`: receive room-wide history refreshes after checkpoints or restore
+* `restore-version`: request a live restore for the selected version
+* `document-restored`: receive the restored Yjs snapshot for the active room
 
 ## Cursor Tracking Events
 * `join-document`: register collaborator metadata for the active document room
@@ -77,8 +85,11 @@ If you want to start with a clean local database:
 6. Open the same document in two different browser storage contexts and verify remote cursors and labels appear.
 7. Blur one editor, close one tab, or switch one tab to a different document and verify the remote cursor disappears.
 8. Join a third client after active edits but before the next autosave and verify it catches up to the latest in-memory state.
-9. If you already have older documents saved before the Yjs migration, reopen one and verify it still loads and resaves correctly.
-10. After Redis is running locally, use the multi-instance flow below to verify cross-backend sync.
+9. Keep editing for more than 30 seconds and verify a checkpoint appears in the history panel.
+10. Restore an older version and verify every open client on the same document updates immediately.
+11. Refresh after restore and verify the restored content persists.
+12. If you already have older documents saved before the Yjs migration, reopen one and verify it still loads, resaves, and starts accumulating history correctly.
+13. After Redis is running locally, use the multi-instance flow below to verify cross-backend sync.
 
 ## Redis Scaling
 * Set `REDIS_URL=redis://localhost:6379` to enable the Socket.io Redis adapter.
@@ -116,9 +127,11 @@ This mode still supports:
 4. Start frontend instance 1: `cd frontend && npm start`
 5. Start frontend instance 2: `cd frontend && npm run start:socket3002`
 6. Open the same document in both frontends and verify text sync, concurrent typing convergence, cursor sync, and document persistence across backend instances.
-7. Join a third client after active edits but before autosave and verify peer catch-up still brings it to the latest state.
-8. Open a different document in one frontend and verify document isolation still holds.
-9. Stop Redis with `docker stop collab-redis` and confirm `npm run devStart:redis` fails loudly instead of silently falling back.
+7. Keep editing for more than 30 seconds and verify the history list updates across both frontend instances.
+8. Restore a version from one frontend and verify the other frontend receives both the restored content and updated history list.
+9. Join a third client after active edits but before autosave and verify peer catch-up still brings it to the latest state.
+10. Open a different document in one frontend and verify document isolation still holds.
+11. Stop Redis with `docker stop collab-redis` and confirm `npm run devStart:redis` fails loudly instead of silently falling back.
 
 Notes:
 

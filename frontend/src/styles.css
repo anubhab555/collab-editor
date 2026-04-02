@@ -7,6 +7,126 @@ body {
   margin: 0;
 }
 
+.editor-shell {
+    align-items: flex-start;
+    display: flex;
+    gap: 1.5rem;
+    padding: 1.5rem;
+}
+
+.editor-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.history-panel {
+    background: white;
+    border-radius: 1rem;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    flex: 0 0 21rem;
+    padding: 1.25rem;
+    position: sticky;
+    top: 1.5rem;
+}
+
+.history-panel__header h2 {
+    color: #1f2937;
+    font-family: "Segoe UI", sans-serif;
+    font-size: 1.05rem;
+    margin: 0;
+}
+
+.history-panel__header p {
+    color: #475569;
+    font-family: "Segoe UI", sans-serif;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    margin: 0.5rem 0 0;
+}
+
+.history-panel__body {
+    margin-top: 1rem;
+}
+
+.history-panel__empty {
+    color: #64748b;
+    font-family: "Segoe UI", sans-serif;
+    font-size: 0.92rem;
+    line-height: 1.5;
+    margin: 0;
+}
+
+.history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.history-list__item {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    padding: 0.85rem;
+}
+
+.history-list__meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.history-list__timestamp,
+.history-list__author {
+    font-family: "Segoe UI", sans-serif;
+    margin: 0;
+}
+
+.history-list__timestamp {
+    color: #0f172a;
+    font-size: 0.92rem;
+    font-weight: 600;
+}
+
+.history-list__author {
+    color: #475569;
+    font-size: 0.82rem;
+}
+
+.history-list__source {
+    align-self: flex-start;
+    background: #e2e8f0;
+    border-radius: 999px;
+    color: #334155;
+    font-family: "Segoe UI", sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.25rem 0.55rem;
+}
+
+.history-list__restore {
+    align-self: flex-start;
+    background: #0f766e;
+    border: none;
+    border-radius: 999px;
+    color: white;
+    cursor: pointer;
+    font-family: "Segoe UI", sans-serif;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 0.45rem 0.8rem;
+}
+
+.history-list__restore:disabled {
+    background: #94a3b8;
+    cursor: not-allowed;
+}
+
 .container .ql-editor {
     width: 8.5in;
     min-height: 11in;
@@ -82,6 +202,13 @@ body {
     body {
         background-color: none;
     }
+    .editor-shell {
+        display: block;
+        padding: 0;
+    }
+    .history-panel {
+        display: none;
+    }
     .container .ql-editor {
        width: 6.5in;
        height: 9in;
@@ -97,5 +224,17 @@ body {
 
     .remote-cursor-layer {
         display: none;
+    }
+}
+
+@media (max-width: 1180px) {
+    .editor-shell {
+        flex-direction: column-reverse;
+        padding: 1rem;
+    }
+
+    .history-panel {
+        position: static;
+        width: 100%;
     }
 }

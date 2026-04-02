@@ -13,6 +13,7 @@ That means:
 - Socket.io is still the transport layer
 - Redis is still the scaling layer for multi-instance delivery
 - MongoDB stores a persisted Yjs snapshot plus a Quill delta mirror
+- timed version checkpoints now sit on top of that persisted state
 
 Important limitation:
 
@@ -107,6 +108,7 @@ High level:
 4. Local Yjs updates are sent over Socket.io with `yjs-update`.
 5. Remote clients apply those updates into their own Yjs document.
 6. New clients can request a live peer catch-up after the persisted baseline loads.
+7. MongoDB keeps timed checkpoints so older states can be restored live for the whole room.
 
 The current cursor work is still relevant because:
 
@@ -151,7 +153,6 @@ You can say:
 
 The next meaningful upgrades are:
 
-- version history
 - Yjs awareness for presence and cursors
 - Dockerized deployment
 

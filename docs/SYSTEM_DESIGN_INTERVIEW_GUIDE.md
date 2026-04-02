@@ -20,12 +20,12 @@ Today, this project is best described as:
 - using Yjs for CRDT-based content sync
 - using MongoDB for persistence
 - using Redis pub/sub for horizontal scaling of Socket.io events
+- using timed version history with live restore
 - using a custom cursor layer with drift correction
 
 Today, it is not yet:
 
 - a full Yjs-awareness-based collaboration system
-- a version-history platform
 - a production container orchestration setup
 
 That honesty helps a lot in interviews.
@@ -61,6 +61,11 @@ The realtime system is built around socket events such as:
 - `yjs-update`
 - `request-document-sync`
 - `document-sync`
+- `get-document-history`
+- `document-history`
+- `document-history-updated`
+- `restore-version`
+- `document-restored`
 - `join-document`
 - `cursor-move`
 - `cursor-update`
@@ -141,7 +146,7 @@ At high level, explain the system in 5 blocks:
 
 Short version:
 
-> The client is a React and Quill editor. Quill is bound to a Yjs shared document for content sync. The client talks to a Node.js Socket.io backend. Each document maps to a Socket.io room. MongoDB stores persisted Yjs snapshots. When Redis is enabled, Socket.io uses Redis pub/sub so multiple backend instances can share realtime events. Cursor presence is still handled by a custom socket layer.
+> The client is a React and Quill editor with a small history sidebar. Quill is bound to a Yjs shared document for content sync. The client talks to a Node.js Socket.io backend. Each document maps to a Socket.io room. MongoDB stores the active Yjs snapshot plus timed checkpoints for restore. When Redis is enabled, Socket.io uses Redis pub/sub so multiple backend instances can share realtime events. Cursor presence is still handled by a custom socket layer.
 
 ### HLD questions an interviewer may ask
 
@@ -153,7 +158,7 @@ Expected answer:
 - Yjs shared content model
 - Socket.io backend
 - Redis as scaling layer
-- MongoDB for persistence
+- MongoDB for persistence and version history
 
 #### How does realtime editing work end to end?
 
@@ -165,6 +170,7 @@ Expected answer:
 - backend broadcasts the update to the document room
 - other clients apply the Yjs update
 - the document is autosaved periodically to MongoDB
+- timed checkpoints provide restoreable history on top of the live state
 
 #### Why is Redis needed?
 
@@ -186,7 +192,6 @@ Expected answer:
 Expected answer:
 
 - content sync is CRDT-based, but presence is not yet moved to Yjs awareness
-- version history is not implemented yet
 - deployment automation is still limited compared with a full production platform
 
 #### How would you scale this further?
@@ -194,7 +199,6 @@ Expected answer:
 Expected answer:
 
 - keep Redis for transport scaling
-- add version history
 - move presence and cursors toward Yjs awareness
 - containerize services
 - later add orchestrated deployment and observability
@@ -222,6 +226,15 @@ Expected answer:
 - backend emits `load-document`
 - frontend applies the Yjs baseline and enables editing
 - backend can request a live peer sync so the client catches up beyond the last autosave
+
+#### How does version history work?
+
+Expected answer:
+
+- the active document state is still autosaved every 2 seconds
+- the backend creates a checkpoint only when content changed and 30 seconds have passed since the last checkpoint
+- MongoDB keeps the latest 20 versions per document
+- restore emits a room-wide update so all collaborators switch to the selected snapshot
 
 #### How do you avoid leaking edits between documents?
 
@@ -270,7 +283,7 @@ Expected answer:
 - one document per editor document
 - a Yjs snapshot as the primary content format
 - a Quill delta mirror for compatibility and inspection
-- no version history yet
+- timed checkpoint versions plus restore-backup snapshots
 
 #### What happens when Redis is down?
 
@@ -290,6 +303,7 @@ These are the most likely interview questions for this project.
 - Why is Redis needed for scaling?
 - Why keep Socket.io and Redis after adding Yjs?
 - Why use MongoDB here?
+- How does live restore work without reloading the page?
 - What are the bottlenecks in the current design?
 - How would you take this to production?
 - What is still missing after the Yjs phase?
@@ -301,6 +315,8 @@ These are the most likely interview questions for this project.
 - How do you catch up a newly joined client to the latest state?
 - How do you avoid cursor flicker or drift?
 - How do you clean up stale cursors?
+- How do you create and cap version history?
+- What happens to connected collaborators when one user restores a version?
 - How is collaborator identity handled today?
 - Why is autosave periodic instead of immediate?
 - What happens if a user disconnects mid-edit?
@@ -315,6 +331,7 @@ Interviewers like hearing tradeoffs, not just features.
 - Yjs for correctness in content convergence
 - MongoDB for fast iteration with JSON-shaped companion data
 - periodic autosave instead of write-on-every-keystroke
+- timed checkpoints instead of versioning every autosave tick
 - Redis adapter only when scaling is needed
 - custom cursor manager for performance-sensitive rendering
 
@@ -322,7 +339,6 @@ Interviewers like hearing tradeoffs, not just features.
 
 - cursor presence is still custom and not yet awareness-based
 - identity is browser-storage-based, not authenticated user identity
-- no version history yet
 - no auth or authorization yet
 - no production observability stack yet
 
@@ -335,12 +351,12 @@ You can honestly say:
 - you migrated content sync to Yjs-based CRDT updates
 - you implemented remote cursor tracking with drift correction
 - you added Redis-based cross-instance Socket.io scaling
+- you added timed version history with live restore
 - you documented single-node and Redis-scaled local validation flows
 
 You should not yet say:
 
 - the system uses Yjs awareness for full presence and cursor sync
-- the system has version history
 - the system has production-grade auth and authorization
 - the system has production-grade deployment orchestration
 
@@ -352,8 +368,8 @@ You should not yet say:
 
 ### If asked for the LLD in 30 seconds
 
-> At low level, the client loads a persisted Yjs baseline by document ID, binds Quill to a local Yjs document, emits Yjs updates for content, and emits throttled cursor updates for presence. The backend broadcasts room-scoped events, stores autosaved Yjs state in MongoDB, and when Redis is enabled those events are propagated across backend instances.
+> At low level, the client loads a persisted Yjs baseline by document ID, binds Quill to a local Yjs document, emits Yjs updates for content, and emits throttled cursor updates for presence. The backend broadcasts room-scoped events, stores autosaved Yjs state plus timed history checkpoints in MongoDB, and when Redis is enabled those events are propagated across backend instances.
 
 ### If asked what the next serious engineering step is
 
-> The next major steps are version history and moving presence or cursors toward Yjs awareness, now that content sync is already CRDT-based.
+> The next major steps are moving presence or cursors toward Yjs awareness and packaging the full stack for production-style deployment, now that content sync and restoreable history are already in place.

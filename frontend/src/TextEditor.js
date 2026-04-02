@@ -36,6 +36,14 @@ const CURSOR_COLORS = [
     "#e67700",
     "#c2255c",
 ]
+const VERSION_SOURCE_LABELS = {
+    checkpoint: "Checkpoint",
+    "restore-backup": "Pre-restore backup",
+}
+const HISTORY_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+})
 const CLIENT_ID_STORAGE_KEY = "collab-editor-client-id"
 const DISPLAY_NAME_STORAGE_KEY = "collab-editor-display-name"
 const YJS_INITIAL_ORIGIN = Symbol("yjs-initial-origin")
@@ -177,11 +185,23 @@ function destroyYjsSession(session) {
     session.ydoc.destroy()
 }
 
+function formatHistoryTimestamp(createdAt) {
+    if (!createdAt) return "Unknown time"
+
+    const date = new Date(createdAt)
+    if (Number.isNaN(date.getTime())) return "Unknown time"
+
+    return HISTORY_TIMESTAMP_FORMATTER.format(date)
+}
+
 export default function TextEditor() {
     const { id: documentId } = useParams()
     const [quill, setQuill] = useState()
     const [socket, setSocket] = useState()
     const [collaborator] = useState(() => getOrCreateCollaborator())
+    const [versions, setVersions] = useState([])
+    const [historyLoading, setHistoryLoading] = useState(true)
+    const [restoringVersionId, setRestoringVersionId] = useState(null)
     const cursorManagerRef = useRef(null)
     const yjsSessionRef = useRef(null)
     const documentReadyRef = useRef(false)
@@ -232,6 +252,57 @@ export default function TextEditor() {
         }, CURSOR_EMIT_INTERVAL_MS - elapsed)
     }, [socket])
 
+    const mountSessionFromSnapshot = useCallback((yjsStateBase64, origin = YJS_INITIAL_ORIGIN) => {
+        if (socket == null || quill == null) return null
+
+        documentReadyRef.current = false
+
+        const currentSession = yjsSessionRef.current
+        if (currentSession) {
+            destroyYjsSession(currentSession)
+        }
+
+        const session = createYjsSession(documentId)
+        yjsSessionRef.current = session
+
+        session.handleDocUpdate = (update, updateOrigin) => {
+            if (yjsSessionRef.current !== session) return
+            if (!documentReadyRef.current || updateOrigin !== session.binding) return
+
+            socket.emit("yjs-update", { update })
+        }
+
+        session.ydoc.on("update", session.handleDocUpdate)
+
+        const baselineUpdate = base64ToUint8Array(yjsStateBase64)
+        if (baselineUpdate.byteLength > 0) {
+            Y.applyUpdate(session.ydoc, baselineUpdate, origin)
+        }
+
+        session.binding = new QuillBinding(session.yText, quill)
+        quill.enable()
+        documentReadyRef.current = true
+        cursorManagerRef.current?.scheduleRender()
+
+        return session
+    }, [documentId, quill, socket])
+
+    const handleRestoreRequest = useCallback((versionId) => {
+        if (socket == null || !documentReadyRef.current) return
+
+        const confirmed = window.confirm(
+            "Restore this version for everyone currently editing the document?"
+        )
+
+        if (!confirmed) return
+
+        setRestoringVersionId(versionId)
+        socket.emit("restore-version", {
+            documentId,
+            versionId,
+        })
+    }, [socket, documentId])
+
     useEffect(() => {
         const s = io(SOCKET_SERVER_URL)
         setSocket(s)
@@ -257,41 +328,21 @@ export default function TextEditor() {
         if (socket == null || quill == null) return
 
         documentReadyRef.current = false
+        setVersions([])
+        setHistoryLoading(true)
+        setRestoringVersionId(null)
         cursorManagerRef.current?.clearAll()
         quill.disable()
         quill.setText("Loading...")
 
-        const session = createYjsSession(documentId)
-        yjsSessionRef.current = session
-
-        session.handleDocUpdate = (update, origin) => {
-            if (yjsSessionRef.current !== session) return
-            if (!documentReadyRef.current || origin !== session.binding) return
-
-            socket.emit("yjs-update", { update })
-        }
-
-        session.ydoc.on("update", session.handleDocUpdate)
-
         const handleLoadDocument = ({ yjsStateBase64 } = {}) => {
-            if (yjsSessionRef.current !== session) return
-
-            const baselineUpdate = base64ToUint8Array(yjsStateBase64)
-
-            if (baselineUpdate.byteLength > 0) {
-                Y.applyUpdate(session.ydoc, baselineUpdate, YJS_INITIAL_ORIGIN)
-            }
-
-            session.binding = new QuillBinding(session.yText, quill)
-            quill.enable()
-            documentReadyRef.current = true
+            mountSessionFromSnapshot(yjsStateBase64)
 
             socket.emit("join-document", {
                 documentId,
                 user: collaborator,
             })
-
-            cursorManagerRef.current?.scheduleRender()
+            socket.emit("get-document-history", { documentId })
         }
 
         socket.once("load-document", handleLoadDocument)
@@ -300,16 +351,18 @@ export default function TextEditor() {
         return () => {
             emitCursorMove(null, { force: true })
             documentReadyRef.current = false
+            setVersions([])
+            setHistoryLoading(true)
+            setRestoringVersionId(null)
             cursorManagerRef.current?.clearAll()
             socket.off("load-document", handleLoadDocument)
             quill.disable()
-            destroyYjsSession(session)
 
-            if (yjsSessionRef.current === session) {
-                yjsSessionRef.current = null
-            }
+            const currentSession = yjsSessionRef.current
+            destroyYjsSession(currentSession)
+            yjsSessionRef.current = null
         }
-    }, [socket, quill, documentId, collaborator, emitCursorMove])
+    }, [socket, quill, documentId, collaborator, emitCursorMove, mountSessionFromSnapshot])
 
     useEffect(() => {
         if (socket == null || quill == null) return
@@ -330,7 +383,7 @@ export default function TextEditor() {
     }, [socket, quill, documentId])
 
     useEffect(() => {
-        if (socket == null) return
+        if (socket == null || quill == null) return
 
         const handleYjsUpdate = ({ documentId: updateDocumentId, update } = {}) => {
             const session = yjsSessionRef.current
@@ -367,6 +420,32 @@ export default function TextEditor() {
             cursorManagerRef.current?.scheduleRender()
         }
 
+        const handleDocumentHistory = ({ documentId: historyDocumentId, versions: nextVersions = [] } = {}) => {
+            if (historyDocumentId !== documentId) return
+
+            setVersions(nextVersions)
+            setHistoryLoading(false)
+        }
+
+        const handleDocumentHistoryUpdated = ({ documentId: historyDocumentId, versions: nextVersions = [] } = {}) => {
+            if (historyDocumentId !== documentId) return
+
+            setVersions(nextVersions)
+            setHistoryLoading(false)
+        }
+
+        const handleDocumentRestored = ({ documentId: restoredDocumentId, yjsStateBase64 } = {}) => {
+            if (restoredDocumentId !== documentId) return
+
+            emitCursorMove(null, { force: true })
+            cursorManagerRef.current?.clearAll()
+            quill.disable()
+            quill.setText("Restoring...")
+            mountSessionFromSnapshot(yjsStateBase64, YJS_INITIAL_ORIGIN)
+            setRestoringVersionId(null)
+            socket.emit("get-document-history", { documentId: restoredDocumentId })
+        }
+
         const handleCursorUpdate = ({ user, range }) => {
             if (!user?.clientId || user.clientId === collaborator.clientId) return
 
@@ -382,6 +461,9 @@ export default function TextEditor() {
         socket.on("yjs-update", handleYjsUpdate)
         socket.on("request-document-sync", handleRequestDocumentSync)
         socket.on("document-sync", handleDocumentSync)
+        socket.on("document-history", handleDocumentHistory)
+        socket.on("document-history-updated", handleDocumentHistoryUpdated)
+        socket.on("document-restored", handleDocumentRestored)
         socket.on("cursor-update", handleCursorUpdate)
         socket.on("cursor-remove", handleCursorRemove)
 
@@ -389,10 +471,13 @@ export default function TextEditor() {
             socket.off("yjs-update", handleYjsUpdate)
             socket.off("request-document-sync", handleRequestDocumentSync)
             socket.off("document-sync", handleDocumentSync)
+            socket.off("document-history", handleDocumentHistory)
+            socket.off("document-history-updated", handleDocumentHistoryUpdated)
+            socket.off("document-restored", handleDocumentRestored)
             socket.off("cursor-update", handleCursorUpdate)
             socket.off("cursor-remove", handleCursorRemove)
         }
-    }, [socket, collaborator.clientId])
+    }, [socket, quill, documentId, collaborator.clientId, emitCursorMove, mountSessionFromSnapshot])
 
     useEffect(() => {
         if (socket == null || quill == null) return
@@ -452,5 +537,52 @@ export default function TextEditor() {
         setQuill(q)
     }, [])
 
-    return <div className="container" ref={wrapperRef}></div>
+    return (
+        <div className="editor-shell">
+            <div className="editor-main">
+                <div className="container" ref={wrapperRef}></div>
+            </div>
+            <aside className="history-panel">
+                <div className="history-panel__header">
+                    <h2>Version History</h2>
+                    <p>Automatic checkpoints are created every 30 seconds while the document changes.</p>
+                </div>
+                <div className="history-panel__body">
+                    {historyLoading ? (
+                        <p className="history-panel__empty">Loading history...</p>
+                    ) : versions.length === 0 ? (
+                        <p className="history-panel__empty">
+                            No history yet. Keep editing and the first checkpoint will appear automatically.
+                        </p>
+                    ) : (
+                        <ul className="history-list">
+                            {versions.map((version) => (
+                                <li className="history-list__item" key={version.versionId}>
+                                    <div className="history-list__meta">
+                                        <p className="history-list__timestamp">
+                                            {formatHistoryTimestamp(version.createdAt)}
+                                        </p>
+                                        <p className="history-list__author">
+                                            {version.savedBy?.displayName || "Guest"}
+                                        </p>
+                                    </div>
+                                    <span className="history-list__source">
+                                        {VERSION_SOURCE_LABELS[version.source] || version.source}
+                                    </span>
+                                    <button
+                                        className="history-list__restore"
+                                        type="button"
+                                        disabled={historyLoading || restoringVersionId != null}
+                                        onClick={() => handleRestoreRequest(version.versionId)}
+                                    >
+                                        {restoringVersionId === version.versionId ? "Restoring..." : "Restore"}
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            </aside>
+        </div>
+    )
 }
