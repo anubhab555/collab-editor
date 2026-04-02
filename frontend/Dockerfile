@@ -10,7 +10,7 @@ ENV NODE_ENV=production
 COPY frontend/package*.json ./
 RUN npm ci
 
-COPY frontend ./
+COPY frontend/. ./
 RUN npm run build
 
 FROM nginx:1.27-alpine
