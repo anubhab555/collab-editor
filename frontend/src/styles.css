@@ -5,6 +5,228 @@
 body {
   background-color: #f3f3f3;
   margin: 0;
+  font-family: "Segoe UI", sans-serif;
+}
+
+button,
+input {
+    font: inherit;
+}
+
+.auth-screen,
+.dashboard-screen {
+    align-items: center;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 1.5rem;
+}
+
+.auth-screen__status {
+    color: #0f172a;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+    padding-top: 6rem;
+}
+
+.auth-card,
+.dashboard-shell {
+    background: white;
+    border-radius: 1.25rem;
+    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
+    max-width: 64rem;
+    width: 100%;
+}
+
+.auth-card {
+    max-width: 28rem;
+    padding: 2rem;
+}
+
+.auth-card__header h1,
+.dashboard-shell__header h1 {
+    color: #0f172a;
+    margin: 0.4rem 0 0.5rem;
+}
+
+.auth-card__header p,
+.dashboard-shell__header p,
+.dashboard-card__header p {
+    color: #475569;
+    margin: 0;
+}
+
+.auth-card__eyebrow,
+.dashboard-shell__eyebrow,
+.access-panel__eyebrow {
+    color: #0f766e;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    margin: 0;
+    text-transform: uppercase;
+}
+
+.auth-card__tabs {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+.auth-card__tab {
+    background: #e2e8f0;
+    border: none;
+    border-radius: 999px;
+    color: #334155;
+    cursor: pointer;
+    font-weight: 600;
+    padding: 0.55rem 0.95rem;
+}
+
+.auth-card__tab--active {
+    background: #0f766e;
+    color: white;
+}
+
+.auth-form,
+.access-panel__share-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.auth-form__field,
+.access-panel__section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.auth-form__field span,
+.access-panel__section h3,
+.access-panel__share-form h3,
+.dashboard-card h2,
+.dashboard-card__header h2 {
+    color: #0f172a;
+    margin: 0;
+}
+
+.auth-form__field input,
+.dashboard-create__input,
+.access-panel__input {
+    border: 1px solid #cbd5e1;
+    border-radius: 0.85rem;
+    padding: 0.75rem 0.85rem;
+}
+
+.auth-form__submit,
+.dashboard-create__submit,
+.dashboard-documents__open,
+.access-panel__share-button,
+.dashboard-shell__logout,
+.access-panel__logout {
+    background: #0f766e;
+    border: none;
+    border-radius: 999px;
+    color: white;
+    cursor: pointer;
+    font-weight: 600;
+    padding: 0.7rem 1rem;
+}
+
+.auth-form__submit:disabled,
+.dashboard-create__submit:disabled,
+.access-panel__share-button:disabled {
+    background: #94a3b8;
+    cursor: not-allowed;
+}
+
+.auth-form__error,
+.dashboard-card__error,
+.access-panel__message--error,
+.editor-alert--error {
+    color: #b91c1c;
+}
+
+.dashboard-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    padding: 1.5rem;
+}
+
+.dashboard-shell__header {
+    align-items: flex-start;
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.dashboard-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 1rem;
+    padding: 1.25rem;
+}
+
+.dashboard-create {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.dashboard-create__input {
+    flex: 1;
+}
+
+.dashboard-documents {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    list-style: none;
+    margin: 1rem 0 0;
+    padding: 0;
+}
+
+.dashboard-documents__item {
+    align-items: center;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 1rem;
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+    padding: 0.95rem 1rem;
+}
+
+.dashboard-documents__meta {
+    min-width: 0;
+}
+
+.dashboard-documents__title,
+.dashboard-documents__details {
+    margin: 0;
+}
+
+.dashboard-documents__title {
+    color: #0f172a;
+    font-weight: 600;
+}
+
+.dashboard-documents__details {
+    color: #475569;
+    font-size: 0.86rem;
+    margin-top: 0.2rem;
+}
+
+.editor-alert {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 0.9rem;
+    margin: 0 1rem 1rem;
+    padding: 0.9rem 1rem;
 }
 
 .editor-shell {
@@ -28,12 +250,62 @@ body {
     top: 1.5rem;
 }
 
+.access-panel,
 .presence-panel,
 .history-panel {
     background: white;
     border-radius: 1rem;
     box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
     padding: 1.25rem;
+}
+
+.access-panel__header {
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+}
+
+.access-panel__header h2 {
+    color: #0f172a;
+    margin: 0.35rem 0;
+}
+
+.access-panel__header p,
+.access-panel__owner,
+.access-panel__empty,
+.access-panel__message {
+    color: #475569;
+    margin: 0;
+}
+
+.access-panel__role {
+    color: #0f172a;
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.access-panel__collaborators {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.access-panel__collaborators li {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.7rem 0.8rem;
+}
+
+.access-panel__message--success {
+    color: #0f766e;
 }
 
 .presence-panel__header h2,
@@ -299,5 +571,15 @@ body {
     .presence-panel,
     .history-panel {
         position: static;
+    }
+}
+
+@media (max-width: 720px) {
+    .dashboard-shell__header,
+    .access-panel__header,
+    .dashboard-documents__item,
+    .dashboard-create {
+        flex-direction: column;
+        align-items: stretch;
     }
 }

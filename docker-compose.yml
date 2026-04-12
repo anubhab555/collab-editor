@@ -35,6 +35,8 @@ services:
     environment:
       CHECKPOINT_INTERVAL_MS: ${CHECKPOINT_INTERVAL_MS:-30000}
       CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:3000,http://127.0.0.1:3000}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      JWT_SECRET: ${JWT_SECRET:-collab-editor-dev-secret}
       MONGODB_URI: mongodb://mongodb:27017/${MONGODB_DB_NAME:-collab-editor}
       REDIS_URL: redis://redis:6379
       SOCKET_PORT: 3001

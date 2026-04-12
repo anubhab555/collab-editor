@@ -1,8 +1,12 @@
 const http = require("http")
+const express = require("express")
 const { Server } = require("socket.io")
 
 const connectToDatabase = require("./config/db")
+const { authenticateHttp, createSocketAuthMiddleware } = require("./middleware/authMiddleware")
 const initializeRedisAdapter = require("./config/redisAdapter")
+const authRoutes = require("./routes/authRoutes")
+const documentRoutes = require("./routes/documentRoutes")
 const registerSocketHandlers = require("./websocket/socketHandler")
 
 const PORT = Number(process.env.SOCKET_PORT) || 3001
@@ -61,33 +65,56 @@ function registerGracefulShutdown(httpServer, cleanupRedis) {
     })
 }
 
-function createHttpRequestHandler() {
-    return (request, response) => {
-        if (request.url === "/healthz") {
-            response.writeHead(200, {
-                "Content-Type": "application/json",
-            })
-            response.end(JSON.stringify({ status: "ok" }))
+function createCorsMiddleware(allowedOrigins) {
+    const allowedOriginSet = new Set(allowedOrigins)
+
+    return (request, response, next) => {
+        const origin = request.headers.origin
+
+        if (origin && allowedOriginSet.has(origin)) {
+            response.setHeader("Access-Control-Allow-Origin", origin)
+            response.setHeader("Vary", "Origin")
+            response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type")
+            response.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+        }
+
+        if (request.method === "OPTIONS") {
+            response.status(204).end()
             return
         }
 
-        // Socket.IO handles its own transport paths on the shared HTTP server.
-        if (request.url?.startsWith("/socket.io/")) {
-            return
-        }
-
-        response.writeHead(404, {
-            "Content-Type": "text/plain",
-        })
-        response.end("Not found")
+        next()
     }
+}
+
+function createHttpApplication(allowedOrigins) {
+    const app = express()
+
+    app.use(createCorsMiddleware(allowedOrigins))
+    app.use(express.json())
+
+    app.get("/healthz", (request, response) => {
+        response.status(200).json({ status: "ok" })
+    })
+
+    app.use("/api/auth", authRoutes)
+    app.use("/api/documents", authenticateHttp, documentRoutes)
+
+    app.use((request, response) => {
+        response.status(404).json({
+            error: "Not found",
+        })
+    })
+
+    return app
 }
 
 async function startServer() {
     await connectToDatabase()
     const allowedClientOrigins = getAllowedClientOrigins()
 
-    const httpServer = http.createServer(createHttpRequestHandler())
+    const httpApplication = createHttpApplication(allowedClientOrigins)
+    const httpServer = http.createServer(httpApplication)
     const io = new Server(httpServer, {
         cors: {
             origin: allowedClientOrigins,
@@ -96,6 +123,7 @@ async function startServer() {
     })
     const redisAdapter = await initializeRedisAdapter(io)
 
+    io.use(createSocketAuthMiddleware())
     registerSocketHandlers(io)
     registerGracefulShutdown(httpServer, redisAdapter.cleanup)
 

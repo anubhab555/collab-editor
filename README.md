@@ -67,6 +67,9 @@ If you want to start with a clean local database:
 4. `cd frontend && npm start`
 
 ## Features
+* JWT-based registration and login
+* Document ownership with owner/editor access control
+* Owner-only sharing by collaborator email
 * Yjs-based CRDT content sync over Socket.io
 * Yjs awareness-based live cursor sync and active collaborator roster
 * Delta-aware remote cursor drift correction while users type concurrently
@@ -96,27 +99,35 @@ If you want to start with a clean local database:
 * `awareness-remove`: remove stale awareness states when collaborators leave, switch documents, or disconnect
 * `awareness-leave`: explicitly clear the current session's ephemeral presence before teardown
 
-## Identity and Scaling Notes
-* User identity is persisted via `localStorage`, so the same browser session shares identity across tabs and documents.
-* Two normal tabs in the same browser profile will usually look like the same collaborator, so they are not the right way to test "different users".
-* To test different collaborator presence and remote cursors, open the same document in two different browser storage contexts such as normal window + incognito, two browser profiles, or two different browsers.
+## Auth, Access, and Scaling Notes
+* Users register or log in through JWT-backed auth endpoints.
+* The token and sanitized user profile are persisted in `localStorage`, so the same browser profile stays logged in across tabs and documents.
+* Each document has one owner and zero or more editor collaborators.
+* A newly created or legacy unowned document is claimed by the first authenticated user who opens it.
+* Only the owner can share document access with an existing registered user by email.
+* Protected REST endpoints and Socket.io handshakes both validate the JWT before allowing document access.
+* To test different collaborators, use two different browser storage contexts such as normal window + incognito, two browser profiles, or two different browsers, then share the document with the second registered user.
 * In production, a load balancer must support sticky sessions or use a WebSocket-aware proxy.
 
 ## Manual Test Flow
 1. Make sure MongoDB is available through your normal local flow.
-2. Open the same document in two tabs and verify text sync works live.
-3. Type concurrently in both tabs and verify the document converges cleanly instead of drifting.
-4. Open a different document in a third tab and verify it stays isolated.
-5. Type, wait 2 seconds, refresh, and verify autosave restores the content.
-6. Open the same document in two different browser storage contexts and verify both names appear in the active-collaborators roster.
-7. Move the caret in one editor and verify the other client shows the remote cursor label.
-8. Blur one editor, close one tab, or switch one tab to a different document and verify the remote cursor disappears and the roster updates.
-9. Join a third client after active edits but before the next autosave and verify it catches up to the latest in-memory state.
-10. Keep editing for more than 30 seconds and verify a checkpoint appears in the history panel.
-11. Restore an older version and verify every open client on the same document updates immediately.
-12. Refresh after restore and verify the restored content persists.
-13. If you already have older documents saved before the Yjs migration, reopen one and verify it still loads, resaves, and starts accumulating history correctly.
-14. After Redis is running locally, use the multi-instance flow below to verify cross-backend sync.
+2. Register or log in as user A.
+3. Create or open a document and verify user A is shown as the owner.
+4. Register or log in as user B in a different browser storage context.
+5. Before user B can open user A's document, share the document from user A's access panel using user B's email.
+6. Open the same shared document as user B and verify text sync works live.
+7. Type concurrently in both sessions and verify the document converges cleanly instead of drifting.
+8. Open a different document as either user and verify it stays isolated.
+9. Type, wait 2 seconds, refresh, and verify autosave restores the content.
+10. Verify both users appear in the active-collaborators roster.
+11. Move the caret in one editor and verify the other client shows the remote cursor label.
+12. Blur one editor, close one tab, or switch one tab to a different document and verify the remote cursor disappears and the roster updates.
+13. Join a third authorized client after active edits but before the next autosave and verify it catches up to the latest in-memory state.
+14. Keep editing for more than 30 seconds and verify a checkpoint appears in the history panel.
+15. Restore an older version and verify every open client on the same document updates immediately.
+16. Refresh after restore and verify the restored content persists.
+17. If you already have older documents saved before the Yjs migration, reopen one while authenticated and verify it is claimed, resaves, and starts accumulating history correctly.
+18. After Redis is running locally, use the multi-instance flow below to verify cross-backend sync.
 
 ## Automated Testing
 Use the automated harness for fast feedback before running browser smoke tests:
@@ -130,12 +141,14 @@ Use the automated harness for fast feedback before running browser smoke tests:
 
 Current automated coverage includes:
 
+* auth service registration/login/token validation
+* document ownership, listing, sharing, and access enforcement
 * checkpoint creation and retention rules
 * restore-backup behavior
 * history fetch and room-wide restore socket events
 * presence-roster rendering and version-history sidebar behavior
-* real browser multi-context collaboration smoke in single-node mode
-* Redis-backed cross-backend browser smoke when Docker Desktop and the engine are running
+* real browser multi-context collaboration smoke in single-node mode with authenticated sharing
+* Redis-backed cross-backend browser smoke with authenticated sharing when Docker Desktop and the engine are running
 * Docker Compose full-stack browser smoke through the packaged Nginx + backend stack
 
 ## Redis Scaling
@@ -173,12 +186,14 @@ This mode still supports:
 3. Start backend instance 2: `cd backend && npm run devStart:redis:3002`
 4. Start frontend instance 1: `cd frontend && npm start`
 5. Start frontend instance 2: `cd frontend && npm run start:socket3002`
-6. Open the same document in both frontends and verify text sync, concurrent typing convergence, active-user roster sync, cursor sync, and document persistence across backend instances.
-7. Keep editing for more than 30 seconds and verify the history list updates across both frontend instances.
-8. Restore a version from one frontend and verify the other frontend receives both the restored content and updated history list.
-9. Join a third client after active edits but before autosave and verify peer catch-up still brings it to the latest state.
-10. Open a different document in one frontend and verify document isolation still holds.
-11. Stop Redis with `docker stop collab-redis` and confirm `npm run devStart:redis` fails loudly instead of silently falling back.
+6. Register or log in as user A in one frontend and user B in the other frontend.
+7. Create/open a document as user A, then share that document with user B's email from the access panel.
+8. Open the same document in both frontends and verify text sync, concurrent typing convergence, active-user roster sync, cursor sync, and document persistence across backend instances.
+9. Keep editing for more than 30 seconds and verify the history list updates across both frontend instances.
+10. Restore a version from one frontend and verify the other frontend receives both the restored content and updated history list.
+11. Join a third authorized client after active edits but before autosave and verify peer catch-up still brings it to the latest state.
+12. Open a different document in one frontend and verify document isolation still holds.
+13. Stop Redis with `docker stop collab-redis` and confirm `npm run devStart:redis` fails loudly instead of silently falling back.
 
 Notes:
 
@@ -192,7 +207,10 @@ Notes:
   * `MONGODB_URI`: MongoDB connection string
   * `REDIS_URL`: enables Redis pub/sub scaling
   * `CHECKPOINT_INTERVAL_MS`: override timed version checkpoint cadence
+  * `JWT_SECRET`: secret used to sign auth tokens; replace the dev default in any shared environment
+  * `JWT_EXPIRES_IN`: token lifetime, defaulting to `7d`
 * Frontend
+  * `REACT_APP_API_URL`: override the REST API base URL for auth and document metadata
   * `REACT_APP_SOCKET_URL`: override the Socket.io server URL for local multi-instance verification
   * `REACT_APP_SAVE_INTERVAL_MS`: override autosave cadence at build time
 

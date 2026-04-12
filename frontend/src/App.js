@@ -1,21 +1,74 @@
-import TextEditor from "./TextEditor"
 import {
-  BrowserRouter as Router,
-  Routes,
-  Route,
-  Navigate,
-} from "react-router-dom";
-import { v4 as uuidV4 } from "uuid";
+    BrowserRouter as Router,
+    Navigate,
+    Route,
+    Routes,
+} from "react-router-dom"
 
-function App() {
-  return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Navigate to={`/documents/${uuidV4()}`} />} />
-        <Route path="/documents/:id" element={<TextEditor />} />
-      </Routes>
-    </Router>
-  )
+import { AuthProvider, useAuth } from "./AuthContext"
+import AuthScreen from "./AuthScreen"
+import Dashboard from "./Dashboard"
+import TextEditor from "./TextEditor"
+
+function LoadingScreen() {
+    return <div className="auth-screen__status">Loading account...</div>
 }
 
-export default App;
+function RootRedirect() {
+    const { authReady, isAuthenticated } = useAuth()
+
+    if (!authReady) {
+        return <LoadingScreen />
+    }
+
+    return <Navigate replace to={isAuthenticated ? "/dashboard" : "/auth"} />
+}
+
+function ProtectedRoute({ children }) {
+    const { authReady, isAuthenticated } = useAuth()
+
+    if (!authReady) {
+        return <LoadingScreen />
+    }
+
+    if (!isAuthenticated) {
+        return <Navigate replace to="/auth" />
+    }
+
+    return children
+}
+
+function AppRoutes() {
+    return (
+        <Routes>
+            <Route path="/" element={<RootRedirect />} />
+            <Route path="/auth" element={<AuthScreen />} />
+            <Route
+                path="/dashboard"
+                element={(
+                    <ProtectedRoute>
+                        <Dashboard />
+                    </ProtectedRoute>
+                )}
+            />
+            <Route
+                path="/documents/:id"
+                element={(
+                    <ProtectedRoute>
+                        <TextEditor />
+                    </ProtectedRoute>
+                )}
+            />
+        </Routes>
+    )
+}
+
+export default function App() {
+    return (
+        <AuthProvider>
+            <Router>
+                <AppRoutes />
+            </Router>
+        </AuthProvider>
+    )
+}

@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Quill from "quill"
 import "quill/dist/quill.snow.css"
 import { io } from "socket.io-client"
-import { useParams } from "react-router-dom"
-import { v4 as uuidV4 } from "uuid"
+import { useNavigate, useParams } from "react-router-dom"
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from "y-protocols/awareness"
 import * as Y from "yjs"
 import { QuillBinding } from "y-quill"
 
+import { useAuth } from "./AuthContext"
+import { apiRequest } from "./api"
 import CursorManager from "./CursorManager"
+import DocumentAccessPanel from "./DocumentAccessPanel"
 import PresencePanel from "./PresencePanel"
 import VersionHistoryPanel from "./VersionHistoryPanel"
 
@@ -39,14 +41,10 @@ const CURSOR_COLORS = [
     "#e67700",
     "#c2255c",
 ]
-const CLIENT_ID_STORAGE_KEY = "collab-editor-client-id"
-const DISPLAY_NAME_STORAGE_KEY = "collab-editor-display-name"
 const YJS_INITIAL_ORIGIN = Symbol("yjs-initial-origin")
 const YJS_REMOTE_ORIGIN = Symbol("yjs-remote-origin")
 const YJS_PEER_SYNC_ORIGIN = Symbol("yjs-peer-sync-origin")
 const YJS_AWARENESS_REMOTE_ORIGIN = Symbol("yjs-awareness-remote-origin")
-
-let collaboratorCache
 
 function getSocketServerUrl() {
     if (process.env.REACT_APP_SOCKET_URL) {
@@ -77,37 +75,14 @@ function getStableHash(value) {
     return Math.abs(hash)
 }
 
-function getDisplayName() {
-    const storedDisplayName = window.localStorage.getItem(DISPLAY_NAME_STORAGE_KEY)?.trim()
-    if (storedDisplayName) return storedDisplayName
+function getCollaboratorFromUser(user) {
+    if (!user?.id) return null
 
-    const promptedName = window.prompt("Enter your display name for collaborative editing:")?.trim()
-    const displayName = promptedName || `Guest-${uuidV4().slice(0, 4)}`
-
-    window.localStorage.setItem(DISPLAY_NAME_STORAGE_KEY, displayName)
-    return displayName
-}
-
-function getOrCreateCollaborator() {
-    if (collaboratorCache) return collaboratorCache
-
-    const storedClientId = window.localStorage.getItem(CLIENT_ID_STORAGE_KEY)
-    const clientId = storedClientId || uuidV4()
-
-    if (!storedClientId) {
-        window.localStorage.setItem(CLIENT_ID_STORAGE_KEY, clientId)
+    return {
+        clientId: user.id,
+        color: CURSOR_COLORS[getStableHash(user.id) % CURSOR_COLORS.length],
+        displayName: user.displayName,
     }
-
-    const displayName = getDisplayName()
-    const color = CURSOR_COLORS[getStableHash(clientId) % CURSOR_COLORS.length]
-
-    collaboratorCache = {
-        clientId,
-        displayName,
-        color,
-    }
-
-    return collaboratorCache
 }
 
 function normalizeRange(range) {
@@ -274,10 +249,19 @@ function buildPresenceSnapshot(session, collaborator) {
 
 export default function TextEditor() {
     const { id: documentId } = useParams()
+    const navigate = useNavigate()
+    const { logout, token, user } = useAuth()
+    const collaborator = useMemo(() => getCollaboratorFromUser(user), [user])
     const [quill, setQuill] = useState()
     const [socket, setSocket] = useState()
-    const [collaborator] = useState(() => getOrCreateCollaborator())
     const [activeCollaborators, setActiveCollaborators] = useState([])
+    const [documentDetails, setDocumentDetails] = useState(null)
+    const [documentError, setDocumentError] = useState("")
+    const [editorAccessLoading, setEditorAccessLoading] = useState(true)
+    const [shareEmail, setShareEmail] = useState("")
+    const [shareError, setShareError] = useState("")
+    const [shareSubmitting, setShareSubmitting] = useState(false)
+    const [shareSuccess, setShareSuccess] = useState("")
     const [versions, setVersions] = useState([])
     const [historyLoading, setHistoryLoading] = useState(true)
     const [restoringVersionId, setRestoringVersionId] = useState(null)
@@ -290,6 +274,11 @@ export default function TextEditor() {
         timeoutId: null,
         pendingRange: null,
     })
+
+    const handleAuthFailure = useCallback(() => {
+        logout()
+        navigate("/auth", { replace: true })
+    }, [logout, navigate])
 
     const resetPresenceUi = useCallback(() => {
         setActiveCollaborators([])
@@ -308,7 +297,7 @@ export default function TextEditor() {
     }, [])
 
     const syncPresenceFromAwareness = useCallback((session = yjsSessionRef.current) => {
-        if (!session || yjsSessionRef.current !== session) {
+        if (!session || yjsSessionRef.current !== session || !collaborator) {
             resetPresenceUi()
             return
         }
@@ -323,7 +312,7 @@ export default function TextEditor() {
     }, [collaborator, resetPresenceUi])
 
     const publishJoinDocument = useCallback(() => {
-        if (socket == null || !documentReadyRef.current) return
+        if (socket == null || !documentReadyRef.current || !collaborator) return
 
         socket.emit("join-document", {
             documentId,
@@ -353,6 +342,7 @@ export default function TextEditor() {
 
     const updateLocalCursorPresence = useCallback((range, options = {}) => {
         const { force = false } = options
+        if (!collaborator) return
         if (!force && !documentReadyRef.current) return
 
         const throttleState = cursorThrottleRef.current
@@ -402,7 +392,7 @@ export default function TextEditor() {
     }, [collaborator, documentId])
 
     const mountSessionFromSnapshot = useCallback((yjsStateBase64, origin = YJS_INITIAL_ORIGIN) => {
-        if (socket == null || quill == null) return null
+        if (socket == null || quill == null || !collaborator) return null
 
         documentReadyRef.current = false
 
@@ -479,14 +469,88 @@ export default function TextEditor() {
         })
     }, [socket, documentId])
 
+    const refreshDocumentDetails = useCallback(async () => {
+        setEditorAccessLoading(true)
+        setDocumentError("")
+
+        try {
+            const payload = await apiRequest(`/documents/${documentId}`, {
+                token,
+            })
+
+            setDocumentDetails(payload.document)
+        } catch (error) {
+            if (error.statusCode === 401) {
+                handleAuthFailure()
+                return
+            }
+
+            setDocumentError(error.message || "Unable to load document access details.")
+        } finally {
+            setEditorAccessLoading(false)
+        }
+    }, [documentId, handleAuthFailure, token])
+
+    const handleShareSubmit = useCallback(async (event) => {
+        event.preventDefault()
+        setShareError("")
+        setShareSuccess("")
+        setShareSubmitting(true)
+
+        try {
+            const payload = await apiRequest(`/documents/${documentId}/share`, {
+                body: { email: shareEmail },
+                method: "POST",
+                token,
+            })
+
+            setDocumentDetails(payload.document)
+            setShareEmail("")
+            setShareSuccess("Access granted successfully.")
+        } catch (error) {
+            if (error.statusCode === 401) {
+                handleAuthFailure()
+                return
+            }
+
+            setShareError(error.message || "Unable to share document access.")
+        } finally {
+            setShareSubmitting(false)
+        }
+    }, [documentId, handleAuthFailure, shareEmail, token])
+
     useEffect(() => {
-        const s = io(SOCKET_SERVER_URL)
+        refreshDocumentDetails()
+    }, [refreshDocumentDetails])
+
+    useEffect(() => {
+        if (!token) return undefined
+
+        const s = io(SOCKET_SERVER_URL, {
+            auth: {
+                token,
+            },
+        })
+
+        const handleConnectError = (error) => {
+            const statusCode = error?.data?.statusCode
+
+            if (statusCode === 401) {
+                handleAuthFailure()
+                return
+            }
+
+            setDocumentError(error.message || "Unable to connect to the collaborative backend.")
+        }
+
+        s.on("connect_error", handleConnectError)
         setSocket(s)
 
         return () => {
+            s.off("connect_error", handleConnectError)
             s.disconnect()
         }
-    }, [])
+    }, [handleAuthFailure, token])
 
     useEffect(() => {
         if (quill == null) return
@@ -504,7 +568,11 @@ export default function TextEditor() {
         if (socket == null || quill == null) return
 
         documentReadyRef.current = false
+        setDocumentError("")
         setActiveCollaborators([])
+        setShareEmail("")
+        setShareError("")
+        setShareSuccess("")
         setVersions([])
         setHistoryLoading(true)
         setRestoringVersionId(null)
@@ -706,6 +774,17 @@ export default function TextEditor() {
             setRestoringVersionId(null)
         }
 
+        const handleDocumentError = ({ message, statusCode } = {}) => {
+            if (statusCode === 401) {
+                handleAuthFailure()
+                return
+            }
+
+            setDocumentError(message || "Unable to load the requested document.")
+            setHistoryLoading(false)
+            setRestoringVersionId(null)
+        }
+
         socket.on("yjs-update", handleYjsUpdate)
         socket.on("request-document-sync", handleRequestDocumentSync)
         socket.on("document-sync", handleDocumentSync)
@@ -715,6 +794,7 @@ export default function TextEditor() {
         socket.on("document-history", handleDocumentHistory)
         socket.on("document-history-updated", handleDocumentHistoryUpdated)
         socket.on("document-restored", handleDocumentRestored)
+        socket.on("document-error", handleDocumentError)
 
         return () => {
             socket.off("yjs-update", handleYjsUpdate)
@@ -726,10 +806,12 @@ export default function TextEditor() {
             socket.off("document-history", handleDocumentHistory)
             socket.off("document-history-updated", handleDocumentHistoryUpdated)
             socket.off("document-restored", handleDocumentRestored)
+            socket.off("document-error", handleDocumentError)
         }
     }, [
         documentId,
         clearPendingCursorThrottle,
+        handleAuthFailure,
         leaveAwarenessSession,
         mountSessionFromSnapshot,
         quill,
@@ -790,9 +872,25 @@ export default function TextEditor() {
     return (
         <div className="editor-shell">
             <div className="editor-main">
+                {documentError ? (
+                    <div className="editor-alert editor-alert--error" role="alert">
+                        {documentError}
+                    </div>
+                ) : null}
                 <div className="container" ref={wrapperRef}></div>
             </div>
             <div className="editor-sidebar">
+                <DocumentAccessPanel
+                    documentDetails={documentDetails}
+                    loading={editorAccessLoading}
+                    onLogout={logout}
+                    onShareEmailChange={setShareEmail}
+                    onShareSubmit={handleShareSubmit}
+                    shareEmail={shareEmail}
+                    shareError={shareError}
+                    shareSubmitting={shareSubmitting}
+                    shareSuccess={shareSuccess}
+                />
                 <PresencePanel collaborators={activeCollaborators} />
                 <VersionHistoryPanel
                     historyLoading={historyLoading}

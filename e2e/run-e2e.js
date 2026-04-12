@@ -278,12 +278,13 @@ async function startBackend({ name, port, mongoDbName, redisUrl, clientOrigins }
     return child
 }
 
-async function startFrontend({ name, port, socketUrl }) {
+async function startFrontend({ apiUrl, name, port, socketUrl }) {
     const env = {
         ...process.env,
         BROWSER: "none",
         HOST: "127.0.0.1",
         PORT: String(port),
+        REACT_APP_API_URL: apiUrl,
         REACT_APP_SOCKET_URL: socketUrl,
         REACT_APP_SAVE_INTERVAL_MS: SAVE_INTERVAL_MS,
     }
@@ -332,6 +333,7 @@ async function runSingleNodeSuite() {
             clientOrigins: "http://127.0.0.1:3000",
         }))
         processes.push(await startFrontend({
+            apiUrl: "http://127.0.0.1:3001/api",
             name: "frontend-3000",
             port: 3000,
             socketUrl: "http://127.0.0.1:3001",
@@ -369,11 +371,13 @@ async function runRedisSuite() {
             clientOrigins: "http://127.0.0.1:3000,http://127.0.0.1:3003",
         }))
         processes.push(await startFrontend({
+            apiUrl: "http://127.0.0.1:3001/api",
             name: "frontend-3000",
             port: 3000,
             socketUrl: "http://127.0.0.1:3001",
         }))
         processes.push(await startFrontend({
+            apiUrl: "http://127.0.0.1:3002/api",
             name: "frontend-3003",
             port: 3003,
             socketUrl: "http://127.0.0.1:3002",

@@ -4,6 +4,7 @@ const Y = require("yjs")
 const Document = require("../models/Document")
 
 const defaultValue = ""
+const DEFAULT_DOCUMENT_TITLE = "Untitled document"
 const CONTENT_FORMATS = {
     LEGACY_QUILL_DELTA: "quill-delta",
     YJS: "yjs",
@@ -17,6 +18,18 @@ const CHECKPOINT_INTERVAL_MS = Number(process.env.CHECKPOINT_INTERVAL_MS) || 300
 const DEFAULT_SAVED_BY = {
     clientId: "guest",
     displayName: "Guest",
+}
+const DOCUMENT_PERMISSIONS = {
+    EDITOR: "editor",
+    OWNER: "owner",
+}
+
+class DocumentServiceError extends Error {
+    constructor(message, statusCode = 400) {
+        super(message)
+        this.name = "DocumentServiceError"
+        this.statusCode = statusCode
+    }
 }
 
 function encodeUpdateToBase64(update) {
@@ -35,9 +48,104 @@ function normalizeSavedBy(savedBy) {
     }
 
     return {
-        clientId: savedBy.clientId,
+        clientId: savedBy.clientId || savedBy.id,
         displayName: savedBy.displayName || DEFAULT_SAVED_BY.displayName,
     }
+}
+
+function getUserId(user) {
+    return user?.id || user?.userId || null
+}
+
+function normalizeTitle(title) {
+    const normalizedTitle = title?.trim()
+
+    return normalizedTitle || DEFAULT_DOCUMENT_TITLE
+}
+
+function normalizeOwner(user) {
+    const ownerId = getUserId(user)
+    if (!ownerId) {
+        throw new DocumentServiceError("Authentication required.", 401)
+    }
+
+    return {
+        ownerDisplayName: user.displayName || "Unknown user",
+        ownerEmail: user.email || "",
+        ownerId,
+    }
+}
+
+function mapCollaborator(user) {
+    return {
+        userId: getUserId(user),
+        displayName: user.displayName || "Unknown user",
+        email: user.email || "",
+        role: DOCUMENT_PERMISSIONS.EDITOR,
+    }
+}
+
+function isDocumentOwner(document, userId) {
+    return Boolean(userId) && document.ownerId === userId
+}
+
+function hasDocumentAccess(document, userId) {
+    if (!userId) return false
+    if (isDocumentOwner(document, userId)) return true
+
+    return (document.collaborators || []).some((collaborator) => collaborator.userId === userId)
+}
+
+function buildDocumentSummary(document, userId) {
+    return {
+        documentId: document._id,
+        title: document.title || DEFAULT_DOCUMENT_TITLE,
+        permission: isDocumentOwner(document, userId)
+            ? DOCUMENT_PERMISSIONS.OWNER
+            : DOCUMENT_PERMISSIONS.EDITOR,
+        owner: document.ownerId
+            ? {
+                id: document.ownerId,
+                displayName: document.ownerDisplayName,
+                email: document.ownerEmail,
+            }
+            : null,
+        collaborators: (document.collaborators || []).map((collaborator) => ({
+            displayName: collaborator.displayName,
+            email: collaborator.email,
+            role: collaborator.role,
+            userId: collaborator.userId,
+        })),
+        createdAt: document.createdAt,
+        updatedAt: document.updatedAt,
+    }
+}
+
+function assignOwner(document, user) {
+    const owner = normalizeOwner(user)
+
+    document.ownerId = owner.ownerId
+    document.ownerDisplayName = owner.ownerDisplayName
+    document.ownerEmail = owner.ownerEmail
+
+    if (!document.title) {
+        document.title = DEFAULT_DOCUMENT_TITLE
+    }
+}
+
+function ensureAccess(document, user) {
+    const userId = getUserId(user)
+
+    if (!document.ownerId) {
+        assignOwner(document, user)
+        return true
+    }
+
+    if (hasDocumentAccess(document, userId)) {
+        return false
+    }
+
+    throw new DocumentServiceError("You do not have access to this document.", 403)
 }
 
 function applyLegacyDataToYText(yText, data) {
@@ -173,24 +281,81 @@ async function findOrCreateDocument(id) {
     })
 }
 
-async function loadDocumentState(id) {
+async function findOrCreateAccessibleDocument(id, user) {
     const document = await findOrCreateDocument(id)
+    if (!document) return null
+
+    const ownershipWasAssigned = ensureAccess(document, user)
+    if (ownershipWasAssigned) {
+        await document.save()
+    }
+
+    return document
+}
+
+async function listAccessibleDocuments(user) {
+    const userId = getUserId(user)
+    if (!userId) {
+        throw new DocumentServiceError("Authentication required.", 401)
+    }
+
+    const documents = await Document.find({
+        $or: [
+            { ownerId: userId },
+            { "collaborators.userId": userId },
+        ],
+    }).sort({ updatedAt: -1 })
+
+    return {
+        documents: documents.map((document) => buildDocumentSummary(document, userId)),
+    }
+}
+
+async function createDocument(payload = {}, user) {
+    const owner = normalizeOwner(user)
+
+    const document = await Document.create({
+        _id: randomUUID(),
+        title: normalizeTitle(payload.title),
+        ownerId: owner.ownerId,
+        ownerDisplayName: owner.ownerDisplayName,
+        ownerEmail: owner.ownerEmail,
+        data: defaultValue,
+        contentFormat: CONTENT_FORMATS.LEGACY_QUILL_DELTA,
+    })
+
+    return {
+        document: buildDocumentSummary(document, owner.ownerId),
+    }
+}
+
+async function getDocumentMetadata(id, user) {
+    const document = await findOrCreateAccessibleDocument(id, user)
+    if (!document) return null
+
+    return {
+        document: buildDocumentSummary(document, getUserId(user)),
+    }
+}
+
+async function loadDocumentState(id, user) {
+    const document = await findOrCreateAccessibleDocument(id, user)
     if (!document) return null
 
     return getDocumentLoadPayload(document)
 }
 
-async function loadDocumentHistory(id) {
-    const document = await findOrCreateDocument(id)
+async function loadDocumentHistory(id, user) {
+    const document = await findOrCreateAccessibleDocument(id, user)
     if (!document) return null
 
     return getDocumentHistoryPayload(document, id)
 }
 
-async function saveDocument(id, { data, yjsStateBase64 } = {}, savedBy) {
+async function saveDocument(id, { data, yjsStateBase64 } = {}, savedBy, user) {
     if (!id) return null
 
-    const document = await findOrCreateDocument(id)
+    const document = await findOrCreateAccessibleDocument(id, user)
     if (!document) return null
 
     const nextData = data ?? defaultValue
@@ -225,10 +390,10 @@ async function saveDocument(id, { data, yjsStateBase64 } = {}, savedBy) {
     }
 }
 
-async function restoreDocumentVersion(id, versionId, savedBy) {
+async function restoreDocumentVersion(id, versionId, savedBy, user) {
     if (!id || !versionId) return null
 
-    const document = await findOrCreateDocument(id)
+    const document = await findOrCreateAccessibleDocument(id, user)
     if (!document) return null
 
     const version = (document.versions || []).find((entry) => entry.versionId === versionId)
@@ -263,16 +428,52 @@ async function restoreDocumentVersion(id, versionId, savedBy) {
     }
 }
 
+async function shareDocumentWithUser(id, userToShare, currentUser) {
+    const document = await findOrCreateAccessibleDocument(id, currentUser)
+    if (!document) return null
+
+    const currentUserId = getUserId(currentUser)
+    if (!isDocumentOwner(document, currentUserId)) {
+        throw new DocumentServiceError("Only the document owner can share access.", 403)
+    }
+
+    if (userToShare.id === currentUserId) {
+        throw new DocumentServiceError("You already own this document.", 400)
+    }
+
+    const collaboratorIndex = (document.collaborators || []).findIndex(
+        (collaborator) => collaborator.userId === userToShare.id
+    )
+    const collaborator = mapCollaborator(userToShare)
+
+    if (collaboratorIndex >= 0) {
+        document.collaborators[collaboratorIndex] = collaborator
+    } else {
+        document.collaborators = [...(document.collaborators || []), collaborator]
+    }
+
+    await document.save()
+
+    return {
+        document: buildDocumentSummary(document, currentUserId),
+    }
+}
+
 module.exports = {
     CHECKPOINT_INTERVAL_MS,
     CONTENT_FORMATS,
+    createDocument,
     MAX_DOCUMENT_VERSIONS,
     VERSION_SOURCES,
     decodeBase64ToUint8Array,
+    DocumentServiceError,
     encodeUpdateToBase64,
     findOrCreateDocument,
+    getDocumentMetadata,
     loadDocumentHistory,
     loadDocumentState,
+    listAccessibleDocuments,
     restoreDocumentVersion,
     saveDocument,
+    shareDocumentWithUser,
 }

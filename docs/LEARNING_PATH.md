@@ -101,12 +101,13 @@ Today you can confidently say:
 - You migrated document content sync to Yjs-based CRDT updates
 - You added timed version history with live restore
 - You added an automated test harness for core backend and frontend collaboration flows
+- You added JWT authentication and document-level owner/editor access control
+- You Dockerized the full stack with frontend, backend, MongoDB, and Redis
 
 Today you should not claim yet:
 
-- Dockerized deployment
 - Kubernetes deployment
-- authenticated document access control
+- enterprise-grade auth features such as OAuth, password reset, refresh-token rotation, team invites, or audit logs
 
 Those are still future upgrades.
 

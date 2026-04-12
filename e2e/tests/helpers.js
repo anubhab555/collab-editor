@@ -1,20 +1,64 @@
 const { expect } = require("@playwright/test")
 
+const DEFAULT_PASSWORD = "password123"
+
 function uniqueDocumentId(prefix) {
     return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
 }
 
-async function seedCollaborator(context, { clientId, displayName }) {
-    await context.addInitScript(
-        ({ nextClientId, nextDisplayName }) => {
-            window.localStorage.setItem("collab-editor-client-id", nextClientId)
-            window.localStorage.setItem("collab-editor-display-name", nextDisplayName)
+function uniqueEmail(prefix) {
+    return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}@example.com`
+}
+
+async function registerUser(apiOrigin, { displayName, email, password = DEFAULT_PASSWORD }) {
+    const response = await fetch(`${apiOrigin}/api/auth/register`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
         },
-        {
-            nextClientId: clientId,
-            nextDisplayName: displayName,
-        }
+        body: JSON.stringify({
+            displayName,
+            email,
+            password,
+        }),
+    })
+
+    if (!response.ok) {
+        const payload = await response.text()
+        throw new Error(`Unable to register test user: ${payload}`)
+    }
+
+    return response.json()
+}
+
+async function seedSession(context, authPayload) {
+    await context.addInitScript(
+        ({ token, user }) => {
+            window.localStorage.setItem("collab-editor-auth-token", token)
+            window.localStorage.setItem("collab-editor-auth-user", JSON.stringify(user))
+        },
+        authPayload
     )
+}
+
+async function shareDocument(apiOrigin, documentId, ownerAuth, collaboratorEmail) {
+    const response = await fetch(`${apiOrigin}/api/documents/${documentId}/share`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${ownerAuth.token}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            email: collaboratorEmail,
+        }),
+    })
+
+    if (!response.ok) {
+        const payload = await response.text()
+        throw new Error(`Unable to share test document: ${payload}`)
+    }
+
+    return response.json()
 }
 
 async function openDocument(page, origin, documentId) {
@@ -55,10 +99,14 @@ async function waitForPresenceCount(page, count) {
 }
 
 module.exports = {
+    DEFAULT_PASSWORD,
     openDocument,
+    registerUser,
     replaceEditorText,
-    seedCollaborator,
+    seedSession,
+    shareDocument,
     uniqueDocumentId,
+    uniqueEmail,
     waitForHistoryCount,
     waitForPresenceCount,
 }

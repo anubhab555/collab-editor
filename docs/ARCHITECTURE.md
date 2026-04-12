@@ -9,7 +9,8 @@ The most important truth to remember is this:
 - Today, the backend can run in single-node mode or Redis-scaled mode.
 - Today, the project also has a Docker Compose full-stack runtime with frontend, backend, MongoDB, and Redis.
 - Today, MongoDB persistence stores a Yjs snapshot, a Quill delta mirror, and timed version checkpoints.
-- The next major upgrades are authenticated access control and production-grade observability.
+- Today, users authenticate with JWTs and documents enforce owner/editor access control.
+- The next major upgrades are production-grade observability and deployment automation.
 
 If you want the step-by-step change history, read [Design Flow](./Design%20Flow.md).
 If you want beginner-friendly explanations of the concepts, start with [Learning Path](./LEARNING_PATH.md).
@@ -26,9 +27,10 @@ If you want interview-focused HLD and LLD preparation, read [System Design Inter
 | Presence model | Yjs awareness-based active roster and cursor sync |
 | Horizontal scaling | Socket.io Redis adapter when `REDIS_URL` is set |
 | Persistence | MongoDB with active Yjs snapshot + Quill delta mirror + timed checkpoints |
-| Identity | Browser-persisted `localStorage` identity |
+| Identity | JWT auth persisted in `localStorage` |
+| Access control | Document owner plus editor collaborators |
 | Packaging | Docker Compose full stack with Nginx frontend, Node backend, MongoDB, and Redis |
-| Next major upgrade | Authenticated access control |
+| Next major upgrade | Observability and deployment automation |
 
 ## Current Vs Target Architecture
 
@@ -41,14 +43,15 @@ If you want interview-focused HLD and LLD preparation, read [System Design Inter
 | Horizontal scaling | Redis adapter for Socket.io | Redis-backed multi-instance realtime gateway in production |
 | Persistence | MongoDB active snapshot + timed checkpoints | MongoDB or equivalent persistent store with active state + version history |
 | Recovery | Timed checkpoints + live restore | Richer history, restore, and possibly diff or audit features |
-| Identity | Browser-local identity only | Authenticated users with document-level access control |
+| Identity | JWT-authenticated users stored in MongoDB | Production auth hardening such as reset flows, OAuth, or refresh-token rotation |
+| Authorization | Owner/editor document access with owner-only sharing | Richer roles, invitations, teams, and audit logs |
 | Deployment | Local scripts plus Docker Compose full-stack packaging | Dockerized full stack with image publishing and optional Kubernetes-ready deployment |
 | Observability and testing | Automated backend service/socket tests, frontend panel tests, and Playwright browser smoke tests, plus manual Redis verification when needed | Automated unit, integration, and multi-client end-to-end testing with production-style monitoring |
 
 The honest way to describe the gap is:
 
 - today, the collaboration engine and restore flow are real
-- the main missing pieces are authenticated access, image/deployment automation, and production-grade observability
+- the main missing pieces are image/deployment automation, richer auth hardening, and production-grade observability
 - that means the project already demonstrates the core distributed editor design, but is not yet the final production-shaped platform
 
 ## Honest Architecture Summary
@@ -59,6 +62,8 @@ This is the clean way to describe the project in an interview:
 - Quill is bound to a Yjs shared document for content collaboration.
 - The backend is a Node.js Socket.io server with a layered structure for config, services, controllers, and socket handling.
 - Each document maps to a Socket.io room keyed by `documentId`.
+- HTTP APIs and Socket.io handshakes both require a valid JWT.
+- Document access is enforced by owner/editor metadata stored with each MongoDB document.
 - MongoDB stores the active Yjs snapshot plus timed history checkpoints for restore.
 - When Redis is enabled, Socket.io uses Redis pub/sub so content and awareness events move across multiple backend instances.
 - Presence stays ephemeral through Yjs awareness while content and history remain the only persisted collaboration state.
@@ -141,6 +146,8 @@ Responsibilities:
 - send Yjs content updates over Socket.io
 - send and receive Yjs awareness updates over Socket.io
 - fetch version history metadata and show the sidebar
+- authenticate users and persist the auth token/profile in `localStorage`
+- show document ownership, collaborator access, and owner-only sharing controls
 - trigger live restore for the selected version
 - show the active-collaborators roster
 - render remote cursors efficiently
@@ -154,11 +161,15 @@ Main files:
 - `backend/config/db.js`
 - `backend/config/redisAdapter.js`
 - `backend/websocket/socketHandler.js`
+- `backend/services/authService.js`
 - `backend/services/documentService.js`
 - `backend/models/Document.js`
+- `backend/models/User.js`
 
 Responsibilities:
 
+- expose protected REST APIs for auth-backed document metadata, lists, creation, and sharing
+- authenticate Socket.io connections before joining document rooms
 - start the Socket.io server
 - connect to MongoDB
 - optionally enable the Redis adapter
@@ -177,6 +188,13 @@ Documents are stored in MongoDB roughly like this:
 ```js
 {
   _id: "document-uuid",
+  title: "Untitled document",
+  ownerId: "user-id",
+  ownerDisplayName: "Anubhab",
+  ownerEmail: "anubhab@example.com",
+  collaborators: [
+    { userId: "other-user-id", displayName: "Teammate", email: "teammate@example.com", role: "editor" }
+  ],
   data: <Quill Delta JSON mirror>,
   yjsState: <Base64 Yjs snapshot>,
   contentFormat: "yjs",
@@ -196,6 +214,7 @@ Documents are stored in MongoDB roughly like this:
 `yjsState` is the primary persisted content format.
 `data` is kept as a Quill delta mirror for compatibility and easier inspection.
 `versions[]` stores the latest 20 timed checkpoints and restore backups.
+Ownership fields decide who can open, edit, save, restore, and share the document.
 
 For local development, the backend defaults to:
 
@@ -203,16 +222,37 @@ For local development, the backend defaults to:
 mongodb://127.0.0.1:27017/collab-editor
 ```
 
+## Authentication And Access Control
+
+The current auth model is intentionally simple but real:
+
+1. A user registers or logs in with email, display name, and password.
+2. Passwords are hashed with bcrypt before storage.
+3. The backend signs a JWT and the frontend stores the token plus sanitized user profile in `localStorage`.
+4. Protected REST requests send the token in the `Authorization: Bearer <token>` header.
+5. Socket.io connections send the token in the handshake auth payload.
+6. The backend attaches the authenticated user to `request.user` or `socket.data.authUser`.
+7. Document service methods check ownership/collaborator access before loading, saving, listing history, restoring, or sharing.
+
+Access rules today:
+
+- the first authenticated user to open a legacy unowned document becomes its owner
+- the owner can share editor access with an existing registered user by email
+- editors can open and edit shared documents but cannot share them further
+- unauthenticated users and non-collaborators cannot join the document socket room
+
 ## Collaboration Model Today
 
 ### Document load flow
 
 1. The browser opens `/documents/:id`.
-2. The frontend emits `get-document(documentId)`.
-3. The backend finds or creates the document in MongoDB.
-4. The backend returns a Yjs baseline with `load-document`.
-5. The frontend applies that Yjs state and binds Quill to the shared Yjs text.
-6. The backend can request a live peer catch-up so the joining client does not rely only on the last autosaved snapshot.
+2. The frontend connects to Socket.io with the user's JWT.
+3. The backend authenticates the socket handshake.
+4. The frontend emits `get-document(documentId)`.
+5. The backend finds or creates the document in MongoDB and enforces owner/editor access.
+6. The backend returns a Yjs baseline with `load-document`.
+7. The frontend applies that Yjs state and binds Quill to the shared Yjs text.
+8. The backend can request a live peer catch-up so the joining client does not rely only on the last autosaved snapshot.
 
 ### Content sync flow
 
@@ -306,7 +346,7 @@ It is important to explain the limits clearly.
 The project is not yet:
 
 - a Kubernetes deployment
-- an authenticated multi-user collaboration platform
+- a production-hardened auth platform with password reset, OAuth, refresh-token rotation, or audit logs
 - a fully automated image publishing and deployment pipeline
 
 Those are still future improvements, not current features.
