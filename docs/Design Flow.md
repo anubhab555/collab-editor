@@ -21,6 +21,31 @@ Use these docs when you want to study the concepts, not just the change log:
 - [CRDT and Yjs 101](./CRDT_YJS_101.md)
 - [Docker and Kubernetes 101](./DOCKER_KUBERNETES_101.md)
 
+## 2026-04-12 - Authenticated document access control
+Status: Implemented
+
+What changed:
+- Added JWT-backed registration, login, and current-user validation.
+- Added password hashing with bcrypt and a dedicated `User` model.
+- Protected REST document APIs and Socket.io handshakes with the same auth middleware.
+- Added document ownership metadata, owner/editor collaborator lists, and owner-only sharing by email.
+- Changed document collaboration tests so the owner must explicitly share access before another authenticated user joins.
+- Kept Yjs content sync, awareness presence, Redis scaling, autosave, version history, and live restore intact under the authenticated model.
+
+Why it changed:
+- The project had a strong realtime engine, but browser-local identity was not enough for a real collaboration product.
+- Auth and access control make the system easier to explain as a secure multi-user editor instead of an open document-room demo.
+
+Interview explanation:
+- I added JWT authentication and document-level authorization so every REST call and Socket.io session is tied to an authenticated user.
+- Each document now has an owner and editor collaborators, and the document service enforces those permissions before load, save, history, restore, and sharing operations.
+
+Learning docs for this phase:
+
+- [Architecture](./ARCHITECTURE.md)
+- [Local Dev Setup](./LOCAL_DEV_SETUP.md)
+- [System Design Interview Guide](./SYSTEM_DESIGN_INTERVIEW_GUIDE.md)
+
 ## 2026-04-02 - Docker packaging
 Status: Implemented
 

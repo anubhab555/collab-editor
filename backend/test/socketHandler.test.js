@@ -7,6 +7,17 @@ const { io: createClient } = require("socket.io-client")
 
 const { createSocketHandler } = require("../websocket/socketHandler")
 
+const AUTH_USER_A = {
+    id: "user-1",
+    displayName: "Anubhab",
+    email: "anubhab@example.com",
+}
+const AUTH_USER_B = {
+    id: "user-2",
+    displayName: "Bob",
+    email: "bob@example.com",
+}
+
 function waitForEvent(socket, eventName, timeoutMs = 3000) {
     return new Promise((resolve, reject) => {
         const timeoutId = setTimeout(() => {
@@ -31,11 +42,14 @@ async function listen(server) {
     return server.address().port
 }
 
-async function connectClient(port) {
+async function connectClient(port, authUser = AUTH_USER_A) {
     const socket = createClient(`http://127.0.0.1:${port}`, {
         transports: ["websocket"],
         forceNew: true,
         reconnection: false,
+        auth: {
+            user: authUser,
+        },
     })
 
     await waitForEvent(socket, "connect")
@@ -63,6 +77,11 @@ async function createHarness(controllerOverrides = {}) {
             origin: "*",
             methods: ["GET", "POST"],
         },
+    })
+
+    io.use((socket, next) => {
+        socket.data.authUser = socket.handshake.auth?.user || AUTH_USER_A
+        next()
     })
 
     createSocketHandler(controllers)(io)
@@ -104,7 +123,7 @@ test("get-document-history returns version metadata to the active socket", async
         }),
     })
 
-    const client = await connectClient(harness.port)
+    const client = await connectClient(harness.port, AUTH_USER_A)
 
     context.after(async () => {
         await closeClient(client)
@@ -157,8 +176,8 @@ test("save-document broadcasts document-history-updated when a checkpoint is cre
         },
     })
 
-    const clientA = await connectClient(harness.port)
-    const clientB = await connectClient(harness.port)
+    const clientA = await connectClient(harness.port, AUTH_USER_A)
+    const clientB = await connectClient(harness.port, AUTH_USER_B)
 
     context.after(async () => {
         await closeClient(clientA)
@@ -172,8 +191,6 @@ test("save-document broadcasts document-history-updated when a checkpoint is cre
     clientA.emit("join-document", {
         documentId: "doc-1",
         user: {
-            clientId: "user-1",
-            displayName: "Anubhab",
             color: "#1864ab",
         },
     })
@@ -196,7 +213,8 @@ test("save-document broadcasts document-history-updated when a checkpoint is cre
     assert.equal(persistCalls.length, 1)
     assert.equal(persistCalls[0].documentId, "doc-1")
     assert.equal(persistCalls[0].payload.payload.yjsStateBase64, "state-1")
-    assert.equal(persistCalls[0].payload.savedBy.displayName, "Anubhab")
+    assert.equal(persistCalls[0].payload.savedBy.displayName, AUTH_USER_A.displayName)
+    assert.equal(persistCalls[0].payload.user.id, AUTH_USER_A.id)
 })
 
 test("restore-version broadcasts restored content and refreshed history to the room", async (context) => {
@@ -235,8 +253,8 @@ test("restore-version broadcasts restored content and refreshed history to the r
         },
     })
 
-    const clientA = await connectClient(harness.port)
-    const clientB = await connectClient(harness.port)
+    const clientA = await connectClient(harness.port, AUTH_USER_A)
+    const clientB = await connectClient(harness.port, AUTH_USER_B)
 
     context.after(async () => {
         await closeClient(clientA)
@@ -250,8 +268,6 @@ test("restore-version broadcasts restored content and refreshed history to the r
     clientA.emit("join-document", {
         documentId: "doc-1",
         user: {
-            clientId: "user-1",
-            displayName: "Anubhab",
             color: "#1864ab",
         },
     })
@@ -281,14 +297,15 @@ test("restore-version broadcasts restored content and refreshed history to the r
     assert.equal(restoreForA.yjsStateBase64, "restored-state")
     assert.equal(restoreForB.versionId, "version-7")
     assert.equal(restoreCalls.length, 1)
-    assert.equal(restoreCalls[0].payload.savedBy.displayName, "Anubhab")
+    assert.equal(restoreCalls[0].payload.savedBy.displayName, AUTH_USER_A.displayName)
+    assert.equal(restoreCalls[0].payload.user.id, AUTH_USER_A.id)
 })
 
 test("join-document requests awareness sync and forwards the first awareness snapshot to the joining client", async (context) => {
     const harness = await createHarness()
 
-    const clientA = await connectClient(harness.port)
-    const clientB = await connectClient(harness.port)
+    const clientA = await connectClient(harness.port, AUTH_USER_A)
+    const clientB = await connectClient(harness.port, AUTH_USER_B)
 
     context.after(async () => {
         await closeClient(clientA)
@@ -302,8 +319,6 @@ test("join-document requests awareness sync and forwards the first awareness sna
     clientA.emit("join-document", {
         documentId: "doc-1",
         user: {
-            clientId: "user-1",
-            displayName: "Alice",
             color: "#1864ab",
         },
     })
@@ -315,8 +330,6 @@ test("join-document requests awareness sync and forwards the first awareness sna
     clientB.emit("join-document", {
         documentId: "doc-1",
         user: {
-            clientId: "user-2",
-            displayName: "Bob",
             color: "#d9480f",
         },
     })
@@ -341,8 +354,8 @@ test("join-document requests awareness sync and forwards the first awareness sna
 test("awareness updates relay to peers and awareness-leave removes stale presence", async (context) => {
     const harness = await createHarness()
 
-    const clientA = await connectClient(harness.port)
-    const clientB = await connectClient(harness.port)
+    const clientA = await connectClient(harness.port, AUTH_USER_A)
+    const clientB = await connectClient(harness.port, AUTH_USER_B)
 
     context.after(async () => {
         await closeClient(clientA)
@@ -356,8 +369,6 @@ test("awareness updates relay to peers and awareness-leave removes stale presenc
     clientA.emit("join-document", {
         documentId: "doc-1",
         user: {
-            clientId: "user-1",
-            displayName: "Alice",
             color: "#1864ab",
         },
     })
@@ -367,8 +378,6 @@ test("awareness updates relay to peers and awareness-leave removes stale presenc
     clientB.emit("join-document", {
         documentId: "doc-1",
         user: {
-            clientId: "user-2",
-            displayName: "Bob",
             color: "#d9480f",
         },
     })
@@ -395,4 +404,29 @@ test("awareness updates relay to peers and awareness-leave removes stale presenc
     const removalPayload = await awarenessRemoval
     assert.equal(removalPayload.documentId, "doc-1")
     assert.deepEqual(removalPayload.awarenessClientIds, [42])
+})
+
+test("get-document emits document-error when access is denied", async (context) => {
+    const harness = await createHarness({
+        loadDocument: async () => {
+            const error = new Error("You do not have access to this document.")
+            error.statusCode = 403
+            throw error
+        },
+    })
+
+    const client = await connectClient(harness.port, AUTH_USER_A)
+
+    context.after(async () => {
+        await closeClient(client)
+        await harness.io.close()
+        await new Promise((resolve) => harness.httpServer.close(resolve))
+    })
+
+    const documentError = waitForEvent(client, "document-error")
+    client.emit("get-document", "doc-locked")
+
+    const payload = await documentError
+    assert.equal(payload.statusCode, 403)
+    assert.equal(payload.message, "You do not have access to this document.")
 })

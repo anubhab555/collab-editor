@@ -23,10 +23,11 @@ Today, this project is best described as:
 - using Redis pub/sub for horizontal scaling of Socket.io events
 - using timed version history with live restore
 - using a dedicated cursor manager with drift correction on top of awareness state
+- using JWT authentication with document owner/editor authorization
 
 Today, it is not yet:
 
-- an authenticated collaboration system
+- a fully production-hardened auth platform with password reset, OAuth, refresh-token rotation, and audit logs
 - a production container orchestration setup beyond Docker Compose
 
 That honesty helps a lot in interviews.
@@ -137,6 +138,34 @@ What to say:
 
 > I partitioned realtime traffic by document room so collaboration is scoped cleanly and isolation comes from the transport layer itself.
 
+### 7. Middleware pattern
+
+HTTP requests and Socket.io handshakes use authentication middleware before reaching document logic.
+
+Why this matters:
+
+- auth logic is centralized instead of repeated in every handler
+- sockets cannot join document rooms unless the JWT is valid
+- REST APIs and realtime collaboration share the same identity model
+
+What to say:
+
+> I used middleware for both REST and Socket.io authentication so downstream document logic always receives a trusted authenticated user.
+
+### 8. Service-layer authorization
+
+Document permissions are enforced inside `documentService`, not only in the UI.
+
+Why this matters:
+
+- clients cannot bypass access control by emitting socket events directly
+- load, save, history, restore, and share operations use the same permission rules
+- backend tests can validate authorization without depending on React
+
+What to say:
+
+> I kept authorization in the service layer so every document operation has one consistent owner/editor access-control path.
+
 ## HLD: How To Explain The System
 
 At high level, explain the system in 5 blocks:
@@ -149,7 +178,7 @@ At high level, explain the system in 5 blocks:
 
 Short version:
 
-> The client is a React and Quill editor with a small presence-plus-history sidebar. Quill is bound to a Yjs shared document for content sync, and a Yjs awareness instance carries ephemeral collaborator state like name and cursor position. The client talks to a Node.js Socket.io backend. Each document maps to a Socket.io room. MongoDB stores the active Yjs snapshot plus timed checkpoints for restore. When Redis is enabled, Socket.io uses Redis pub/sub so multiple backend instances can share realtime content and awareness events.
+> The client is a React and Quill editor with auth, access, presence, and history sidebars. Quill is bound to a Yjs shared document for content sync, and a Yjs awareness instance carries ephemeral collaborator state like name and cursor position. The client talks to a Node.js Socket.io backend using a JWT-authenticated socket handshake. Each document maps to a Socket.io room after the backend confirms owner/editor access. MongoDB stores users, document access metadata, the active Yjs snapshot, and timed checkpoints for restore. When Redis is enabled, Socket.io uses Redis pub/sub so multiple backend instances can share realtime content and awareness events.
 
 ### HLD questions an interviewer may ask
 
@@ -158,6 +187,7 @@ Short version:
 Expected answer:
 
 - React + Quill frontend
+- JWT authentication and protected document APIs
 - Yjs shared content model
 - Socket.io backend
 - Redis as scaling layer
@@ -175,6 +205,17 @@ Expected answer:
 - local awareness state separately tracks user metadata and cursor position
 - the document is autosaved periodically to MongoDB
 - timed checkpoints provide restoreable history on top of the live state
+
+#### How does access control work?
+
+Expected answer:
+
+- users register or log in and receive a JWT
+- REST requests use `Authorization: Bearer <token>`
+- Socket.io sends the token in the handshake auth payload
+- backend middleware resolves the authenticated user
+- the document service checks whether the user is the owner or an editor collaborator before load, save, history, restore, or share
+- only owners can share documents with existing users by email
 
 #### Why is Redis needed?
 
@@ -195,8 +236,9 @@ Expected answer:
 
 Expected answer:
 
-- identity is still browser-local instead of authenticated
+- auth is JWT-based, but still not enterprise-grade auth
 - deployment automation is still limited compared with a full production platform, even though the stack is now containerized with Docker Compose
+- auth is intentionally simple and does not yet include reset flows, OAuth, refresh-token rotation, read-only roles, teams, or audit logs
 
 #### How would you scale this further?
 
@@ -204,7 +246,7 @@ Expected answer:
 
 - keep Redis for transport scaling
 - build on the existing Dockerized stack
-- add authenticated user identity and access control
+- add richer auth features such as invitations, roles, and audit logs
 - later add orchestrated deployment and observability
 
 ## LLD: How To Explain The System
@@ -224,7 +266,8 @@ At low level, interviewers usually care about:
 Expected answer:
 
 - client emits `get-document(documentId)`
-- backend finds or creates the MongoDB document
+- backend authenticates the socket and finds or creates the MongoDB document
+- backend verifies owner/editor access or claims a legacy unowned document for the first authenticated opener
 - backend loads a persisted Yjs snapshot, or converts a legacy Quill delta document into Yjs
 - socket joins the room
 - backend emits `load-document`
@@ -326,6 +369,8 @@ These are the most likely interview questions for this project.
 - How is collaborator identity handled today?
 - Why is autosave periodic instead of immediate?
 - What happens if a user disconnects mid-edit?
+- Where is authorization enforced and why not only in the frontend?
+- How do legacy unowned documents behave after auth is added?
 
 ## Good Tradeoffs To Mention
 
@@ -340,11 +385,11 @@ Interviewers like hearing tradeoffs, not just features.
 - timed checkpoints instead of versioning every autosave tick
 - Redis adapter only when scaling is needed
 - custom cursor manager for performance-sensitive rendering on top of awareness state
+- JWT auth as a simple first production-grade identity layer before adding OAuth or enterprise auth
 
 ### Current acknowledged limitations
 
-- identity is browser-storage-based, not authenticated user identity
-- no auth or authorization yet
+- no password reset, OAuth, refresh-token rotation, read-only role, invitation flow, team model, or audit log yet
 - no production observability stack yet
 
 ## What You Can Claim Today
@@ -360,22 +405,23 @@ You can honestly say:
 - you built an automated test harness for backend service logic, socket events, and the history sidebar
 - you added Playwright browser smoke tests for multi-client collaboration flows
 - you documented single-node and Redis-scaled local validation flows
+- you added JWT authentication and document-level owner/editor access control
 
 You should not yet say:
 
-- the system has production-grade auth and authorization
+- the system has enterprise-grade auth features such as OAuth, password reset, refresh-token rotation, or audit logs
 - the system has production-grade deployment orchestration
 
 ## Fast Answer Templates
 
 ### If asked for the HLD in 30 seconds
 
-> The system has a React and Quill frontend, a Node.js Socket.io realtime backend, Yjs as the shared content and awareness model, MongoDB for persistence, and optional Redis pub/sub for horizontal scaling. Each document maps to a socket room, so content updates and awareness updates stay isolated by document ID.
+> The system has a React and Quill frontend, a Node.js Socket.io realtime backend, JWT authentication, Yjs as the shared content and awareness model, MongoDB for users/document state/history, and optional Redis pub/sub for horizontal scaling. Each document maps to a socket room after access control passes, so content updates and awareness updates stay isolated by document ID.
 
 ### If asked for the LLD in 30 seconds
 
-> At low level, the client loads a persisted Yjs baseline by document ID, binds Quill to a local Yjs document, attaches a Yjs awareness instance for `{ user, cursor }`, emits Yjs updates for content, and emits throttled awareness updates for presence. The backend broadcasts room-scoped events, stores autosaved Yjs state plus timed history checkpoints in MongoDB, and when Redis is enabled those events are propagated across backend instances.
+> At low level, the client authenticates, loads a persisted Yjs baseline by document ID, binds Quill to a local Yjs document, attaches a Yjs awareness instance for `{ user, cursor }`, emits Yjs updates for content, and emits throttled awareness updates for presence. The backend authenticates the socket, enforces owner/editor access before joining the room, broadcasts room-scoped events, stores autosaved Yjs state plus timed history checkpoints in MongoDB, and when Redis is enabled those events propagate across backend instances.
 
 ### If asked what the next serious engineering step is
 
-> The next major steps are packaging the full stack for production-style deployment and replacing browser-local identity with authenticated users and document-level access control, now that content sync, presence, and restoreable history are already in place.
+> The next major steps are production hardening: observability, deployment automation, richer auth roles/invitations, and possibly audit logs now that content sync, presence, restoreable history, Docker packaging, and authenticated access control are already in place.

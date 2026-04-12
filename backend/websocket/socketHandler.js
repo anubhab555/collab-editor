@@ -119,6 +119,19 @@ function emitHistoryUpdate(io, documentId, history) {
     io.to(documentId).emit("document-history-updated", history)
 }
 
+function emitDocumentError(socket, error) {
+    const statusCode = error?.statusCode || 500
+
+    if (statusCode >= 500) {
+        console.error("[Socket] Document request failed", error)
+    }
+
+    socket.emit("document-error", {
+        message: error?.message || "Document request failed.",
+        statusCode,
+    })
+}
+
 function createSocketHandler({
     loadDocument,
     loadHistory,
@@ -152,7 +165,15 @@ function createSocketHandler({
 
         io.on("connection", (socket) => {
             socket.on("get-document", async (documentId) => {
-                const document = await loadDocument(documentId)
+                let document
+
+                try {
+                    document = await loadDocument(documentId, socket.data.authUser)
+                } catch (error) {
+                    emitDocumentError(socket, error)
+                    return
+                }
+
                 if (!document) return
 
                 const previousDocumentId = socket.data.documentId
@@ -191,14 +212,14 @@ function createSocketHandler({
             })
 
             socket.on("join-document", async ({ documentId, user } = {}) => {
-                if (!documentId || socket.data.documentId !== documentId || !user?.clientId) {
+                if (!documentId || socket.data.documentId !== documentId || !socket.data.authUser?.id) {
                     return
                 }
 
                 socket.data.user = {
-                    clientId: user.clientId,
-                    color: user.color,
-                    displayName: user.displayName,
+                    clientId: socket.data.authUser.id,
+                    color: user?.color,
+                    displayName: socket.data.authUser.displayName,
                 }
 
                 clearPendingSync(pendingAwarenessSyncs, socket.data.pendingAwarenessSyncRequestId)
@@ -224,7 +245,15 @@ function createSocketHandler({
             socket.on("get-document-history", async ({ documentId } = {}) => {
                 if (!documentId || socket.data.documentId !== documentId) return
 
-                const history = await loadHistory(documentId)
+                let history
+
+                try {
+                    history = await loadHistory(documentId, socket.data.authUser)
+                } catch (error) {
+                    emitDocumentError(socket, error)
+                    return
+                }
+
                 emitHistory(socket, history)
             })
 
@@ -336,13 +365,21 @@ function createSocketHandler({
                 const { documentId } = socket.data
                 if (!documentId) return
 
-                const result = await persistDocument(documentId, {
-                    payload: {
-                        data: payload.data,
-                        yjsStateBase64: payload.yjsStateBase64,
-                    },
-                    savedBy: socket.data.user,
-                })
+                let result
+
+                try {
+                    result = await persistDocument(documentId, {
+                        payload: {
+                            data: payload.data,
+                            yjsStateBase64: payload.yjsStateBase64,
+                        },
+                        savedBy: socket.data.user || socket.data.authUser,
+                        user: socket.data.authUser,
+                    })
+                } catch (error) {
+                    emitDocumentError(socket, error)
+                    return
+                }
 
                 if (result?.historyUpdated) {
                     emitHistoryUpdate(io, documentId, result.history)
@@ -352,10 +389,18 @@ function createSocketHandler({
             socket.on("restore-version", async ({ documentId, versionId } = {}) => {
                 if (!documentId || socket.data.documentId !== documentId || !versionId) return
 
-                const result = await restoreVersion(documentId, {
-                    versionId,
-                    savedBy: socket.data.user,
-                })
+                let result
+
+                try {
+                    result = await restoreVersion(documentId, {
+                        versionId,
+                        savedBy: socket.data.user || socket.data.authUser,
+                        user: socket.data.authUser,
+                    })
+                } catch (error) {
+                    emitDocumentError(socket, error)
+                    return
+                }
 
                 if (!result) return
 

@@ -39,11 +39,56 @@ const versionSchema = new Schema(
     }
 )
 
+const collaboratorSchema = new Schema(
+    {
+        userId: {
+            type: String,
+            required: true,
+        },
+        displayName: {
+            type: String,
+            required: true,
+        },
+        email: {
+            type: String,
+            required: true,
+        },
+        role: {
+            type: String,
+            default: "editor",
+        },
+    },
+    {
+        _id: false,
+    }
+)
+
 const documentSchema = new Schema(
     {
         _id: {
             type: String,
             required: true,
+        },
+        title: {
+            type: String,
+            default: "Untitled document",
+            trim: true,
+        },
+        ownerId: {
+            type: String,
+            default: null,
+        },
+        ownerDisplayName: {
+            type: String,
+            default: null,
+        },
+        ownerEmail: {
+            type: String,
+            default: null,
+        },
+        collaborators: {
+            type: [collaboratorSchema],
+            default: [],
         },
         data: {
             type: Schema.Types.Mixed,
@@ -63,6 +108,7 @@ const documentSchema = new Schema(
         },
     },
     {
+        timestamps: true,
         versionKey: false,
     }
 )

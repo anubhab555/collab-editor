@@ -3,8 +3,11 @@ const { test, expect } = require("@playwright/test")
 const {
     openDocument,
     replaceEditorText,
-    seedCollaborator,
+    registerUser,
+    seedSession,
+    shareDocument,
     uniqueDocumentId,
+    uniqueEmail,
     waitForHistoryCount,
     waitForPresenceCount,
 } = require("./helpers")
@@ -13,15 +16,19 @@ test("redis-backed collaboration syncs history and restore across backend instan
     const documentId = uniqueDocumentId("redis")
     const contextA = await browser.newContext()
     const contextB = await browser.newContext()
-
-    await seedCollaborator(contextA, {
-        clientId: "redis-user-a",
+    const authA = await registerUser("http://127.0.0.1:3001", {
         displayName: "Alice",
+        email: uniqueEmail("redis-alice"),
     })
-    await seedCollaborator(contextB, {
-        clientId: "redis-user-b",
+    const authB = await registerUser("http://127.0.0.1:3001", {
         displayName: "Bob",
+        email: uniqueEmail("redis-bob"),
     })
+
+    await shareDocument("http://127.0.0.1:3001", documentId, authA, authB.user.email)
+
+    await seedSession(contextA, authA)
+    await seedSession(contextB, authB)
 
     const pageA = await contextA.newPage()
     const pageB = await contextB.newPage()
@@ -30,10 +37,10 @@ test("redis-backed collaboration syncs history and restore across backend instan
 
     await waitForPresenceCount(pageA, 2)
     await waitForPresenceCount(pageB, 2)
-    await expect(pageA.getByTestId("presence-item-redis-user-a")).toBeVisible()
-    await expect(pageA.getByTestId("presence-item-redis-user-b")).toBeVisible()
-    await expect(pageB.getByTestId("presence-item-redis-user-a")).toBeVisible()
-    await expect(pageB.getByTestId("presence-item-redis-user-b")).toBeVisible()
+    await expect(pageA.getByTestId(`presence-item-${authA.user.id}`)).toBeVisible()
+    await expect(pageA.getByTestId(`presence-item-${authB.user.id}`)).toBeVisible()
+    await expect(pageB.getByTestId(`presence-item-${authA.user.id}`)).toBeVisible()
+    await expect(pageB.getByTestId(`presence-item-${authB.user.id}`)).toBeVisible()
 
     await replaceEditorText(pageA, "Redis version one")
     await expect(editorB).toContainText("Redis version one")
@@ -59,7 +66,7 @@ test("redis-backed collaboration syncs history and restore across backend instan
 
     await contextA.close()
     await waitForPresenceCount(pageB, 1)
-    await expect(pageB.getByTestId("presence-item-redis-user-b")).toBeVisible()
-    await expect(pageB.locator("[data-testid=\"presence-item-redis-user-a\"]")).toHaveCount(0)
+    await expect(pageB.getByTestId(`presence-item-${authB.user.id}`)).toBeVisible()
+    await expect(pageB.locator(`[data-testid="presence-item-${authA.user.id}"]`)).toHaveCount(0)
     await contextB.close()
 })
