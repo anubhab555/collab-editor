@@ -35,9 +35,10 @@ services:
     environment:
       CHECKPOINT_INTERVAL_MS: ${CHECKPOINT_INTERVAL_MS:-30000}
       CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:3000,http://127.0.0.1:3000}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
-      JWT_SECRET: ${JWT_SECRET:-collab-editor-dev-secret}
+      JWT_EXPIRES_IN_SECONDS: ${JWT_EXPIRES_IN_SECONDS:-604800}
+      JWT_SECRET: ${JWT_SECRET:-collab-editor-dev-secret-change-before-prod-32-bytes}
       MONGODB_URI: mongodb://mongodb:27017/${MONGODB_DB_NAME:-collab-editor}
+      REDIS_ENABLED: "true"
       REDIS_URL: redis://redis:6379
       SOCKET_PORT: 3001
     ports:
@@ -46,9 +47,9 @@ services:
       test:
         [
           "CMD",
-          "node",
-          "-e",
-          "require('http').get('http://127.0.0.1:3001/healthz', (response) => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))",
+          "wget",
+          "-qO-",
+          "http://127.0.0.1:3001/healthz",
         ]
       interval: 10s
       timeout: 5s

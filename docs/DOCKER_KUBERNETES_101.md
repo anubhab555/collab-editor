@@ -23,7 +23,7 @@ so the app can run more consistently across environments.
 For this project, Docker now makes it easier to run:
 
 - frontend
-- backend
+- Java Spring Boot backend
 - Redis
 - MongoDB
 
@@ -90,7 +90,7 @@ Ways to inject configuration values and sensitive data.
 One practical mapping could be:
 
 - frontend deployment
-- backend deployment
+- Spring Boot backend deployment
 - ingress or load balancer in front
 - Redis as a managed service or dedicated deployment
 - MongoDB as a managed database or separate deployment
@@ -129,7 +129,7 @@ That is a clear and honest answer.
 Some production ideas already exist in the project:
 
 - env-based configuration
-- graceful shutdown
+- Spring Boot health/readiness endpoints
 - explicit runtime logging
 - separation between transport, scaling, and persistence concerns
 - Dockerized full-stack packaging with health checks

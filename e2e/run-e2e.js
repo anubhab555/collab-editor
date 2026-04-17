@@ -11,6 +11,7 @@ const POWERSHELL_COMMAND = IS_WINDOWS
     : "powershell"
 const PLAYWRIGHT_CLI = require.resolve("@playwright/test/cli")
 const REACT_SCRIPTS_CLI = path.join(ROOT, "frontend", "node_modules", "react-scripts", "bin", "react-scripts.js")
+const GRADLE_COMMAND = path.join(ROOT, "backend", IS_WINDOWS ? "gradlew.bat" : "gradlew")
 const PLAYWRIGHT_CHANNEL = process.env.PLAYWRIGHT_BROWSER_CHANNEL || "msedge"
 const CHECKPOINT_INTERVAL_MS = process.env.E2E_CHECKPOINT_INTERVAL_MS || "1500"
 const SAVE_INTERVAL_MS = process.env.E2E_SAVE_INTERVAL_MS || "500"
@@ -22,7 +23,10 @@ function log(message) {
 
 function spawnProcess(command, args, options = {}) {
     const { name, ...spawnOptions } = options
-    const child = spawn(command, args, {
+    const isBatchFile = IS_WINDOWS && command.toLowerCase().endsWith(".bat")
+    const processCommand = isBatchFile ? "cmd.exe" : command
+    const processArgs = isBatchFile ? ["/d", "/s", "/c", command, ...args] : args
+    const child = spawn(processCommand, processArgs, {
         cwd: ROOT,
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
@@ -252,10 +256,12 @@ async function startDockerStack() {
 async function startBackend({ name, port, mongoDbName, redisUrl, clientOrigins }) {
     const env = {
         ...process.env,
+        GRADLE_USER_HOME: path.join(ROOT, "backend", ".gradle"),
         SOCKET_PORT: String(port),
         MONGODB_URI: `mongodb://127.0.0.1:27017/${mongoDbName}`,
         CHECKPOINT_INTERVAL_MS,
         CLIENT_ORIGIN: clientOrigins,
+        REDIS_ENABLED: redisUrl ? "true" : "false",
     }
 
     if (redisUrl) {
@@ -265,8 +271,8 @@ async function startBackend({ name, port, mongoDbName, redisUrl, clientOrigins }
     }
 
     const child = spawnProcess(
-        process.execPath,
-        ["server.js"],
+        GRADLE_COMMAND,
+        ["bootRun", "--no-daemon"],
         {
             cwd: path.join(ROOT, "backend"),
             env,

@@ -1,167 +1,78 @@
 # Realtime Collaboration 101
 
-This document teaches the core ideas behind the current project in simple language.
+This project uses a Java Spring Boot WebSocket backend.
 
-## 1. What problem are we solving?
+## What Is A WebSocket?
 
-A collaborative editor lets multiple people work on the same document at the same time.
+HTTP request/response is short-lived:
 
-That sounds simple, but there are several moving parts:
-
-- everyone must see edits quickly
-- everyone must stay in sync
-- cursors should feel live
-- data should still be saved if the page reloads
-
-This project solves that with:
-
-- React for the UI
-- Quill for the editor
-- Socket.io for real-time events
-- Yjs for shared content sync
-- MongoDB for persistence
-
-## 2. What is a WebSocket?
-
-A WebSocket is a long-lived connection between browser and server.
-
-Normal HTTP is request-response:
-
-- browser sends a request
-- server sends a response
-- connection is done
-
-A WebSocket stays open:
-
-- browser and server can both send messages at any time
-- this is useful for chat, live dashboards, multiplayer apps, and collaborative editors
-
-## 3. Why use Socket.io instead of raw WebSocket?
-
-Socket.io is a library built on top of the WebSocket idea.
-
-It gives helpful features like:
-
-- named events such as `yjs-update` or `awareness-update`
-- rooms, so one document's users do not receive another document's events
-- reconnect behavior
-- a simpler developer experience
-
-So the project is still a real-time WebSocket-style system, but Socket.io makes it much easier to build.
-
-## 4. What is a room?
-
-A room is just a group of sockets.
-
-In this project:
-
-- each `documentId` becomes a room
-- users editing the same document join the same room
-- broadcasts go only to that room
-
-That means:
-
-- document A users do not receive document B events
-- the server can scope edit and awareness events correctly
-
-## 5. What is a Quill Delta?
-
-Quill does not just think in terms of "the full document string."
-It can express edits as operations.
-
-Example:
-
-```js
-retain 5, insert "hello"
+```text
+client asks -> server responds -> connection ends
 ```
 
-That means:
+WebSocket is long-lived:
 
-- keep the first 5 characters
-- then insert `"hello"`
+```text
+client connects -> connection stays open -> both sides send messages
+```
 
-This is useful because:
+That is useful for collaborative editing because edits must appear immediately.
 
-- payloads are smaller than sending the whole document every time
-- the app can apply only the change, not rewrite everything
+## What Is A Document Room?
 
-## 6. Is the current app already OT or CRDT?
+A room is a group of WebSocket sessions editing the same document.
 
-Partly yes.
+```text
+document A room: user 1, user 2
+document B room: user 3
+```
 
-This is the honest interview answer:
+Events from document A should not reach document B.
 
-- document content is now CRDT-based through Yjs
-- Socket.io is still the transport layer
-- presence state is now carried by Yjs awareness over that transport
-- cursor positions still use transform logic in the renderer because visual cursor placement is still a local UI problem
+The Java backend keeps room membership in memory and uses Redis Pub/Sub to share room events across backend instances.
 
-So the current system is more unified than before:
+## What Does Yjs Do?
 
-- Yjs for content correctness
-- Yjs awareness for ephemeral collaborator state
-- Socket.io room events for transport and scaling
-- a custom cursor renderer for efficient DOM updates
+Yjs is the CRDT layer.
 
-## 7. Why do cursors drift?
+It handles concurrent edits in the browser.
 
-Suppose:
+The Java backend does not merge text manually.
 
-- User B's cursor is at index 10
-- User A inserts text before index 10
+Instead:
 
-Now index 10 is no longer the same place in the document.
+1. browser creates a Yjs update
+2. browser sends it to Spring Boot
+3. Spring Boot relays it to authorized collaborators
+4. each browser applies the update
+5. Yjs converges the document state
 
-So if you keep User B's cursor at the old index, it looks wrong.
+## What Does Spring Boot Do?
 
-This is called cursor drift.
+Spring Boot owns backend responsibilities:
 
-The project reduces that by transforming cursor positions using Quill Delta `transformPosition(...)`.
+* validate JWT
+* check document access
+* maintain WebSocket sessions
+* route events by document id
+* publish events to Redis
+* persist snapshots to MongoDB
+* broadcast restore events
 
-## 8. Why is cursor rendering handled outside React?
+## Presence And Cursor Flow
 
-React is great for UI, but remote cursor movement can happen very frequently.
+Presence uses Yjs awareness.
 
-If every cursor update caused a React re-render, that could become expensive.
+Flow:
 
-So the project uses a custom `CursorManager` class that:
+1. user moves cursor
+2. frontend updates awareness state
+3. frontend sends `awareness-update`
+4. Spring Boot relays it to the document room
+5. other clients render remote cursor labels
 
-- stores remote cursor state
-- manipulates DOM nodes directly
-- batches updates with `requestAnimationFrame`
+Presence is ephemeral and is not persisted.
 
-That is a good engineering choice for this kind of highly dynamic overlay.
+## Interview Answer
 
-## 9. Why do we still autosave if events are real-time?
-
-Real-time sync and persistence are different problems.
-
-Real-time sync means:
-
-- other users see your changes immediately
-
-Persistence means:
-
-- the document still exists after refresh or reconnect
-
-That is why the app also sends `save-document` every 2 seconds and stores a Yjs snapshot plus a Quill delta mirror in MongoDB.
-
-## 10. Where these concepts live in this project
-
-- Socket setup: `frontend/src/TextEditor.js`
-- Cursor engine: `frontend/src/CursorManager.js`
-- Server room logic: `backend/websocket/socketHandler.js`
-- MongoDB persistence: `backend/services/documentService.js`
-
-## 11. Interview-ready explanation
-
-You can say:
-
-> I built the editor on top of React, Quill, Socket.io, and Yjs. Quill provides the editing UI, Yjs provides CRDT-based content convergence, Yjs awareness carries ephemeral collaborator state like names and cursors, Socket.io handles room-based realtime transport, and a dedicated cursor renderer keeps remote carets visually aligned with delta-aware position updates.
-
-## 12. What to learn next
-
-After this document, read:
-
-- [Redis Scaling 101](./REDIS_SCALING_101.md)
-- [CRDT and Yjs 101](./CRDT_YJS_101.md)
+> The realtime layer uses Spring Boot WebSockets. The browser owns Yjs CRDT state, and the backend owns authenticated room-based routing. Redis Pub/Sub lets multiple backend instances exchange those room events.

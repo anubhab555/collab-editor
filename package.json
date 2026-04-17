@@ -12,7 +12,7 @@
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
-    "test:backend": "npm --prefix backend test",
+    "test:backend": "node ./scripts/run-gradle.js test",
     "test:frontend": "npm --prefix frontend run test:ci",
     "test": "npm run test:backend && npm run test:frontend",
     "e2e:single": "node ./e2e/run-e2e.js single",

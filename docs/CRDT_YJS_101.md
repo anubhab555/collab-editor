@@ -1,159 +1,75 @@
-# CRDT and Yjs 101
+# CRDT And Yjs 101
 
-This document explains the CRDT layer that is now implemented in the project.
+Yjs is the CRDT library used by the browser editor.
 
-## 1. What is implemented today?
+## What Problem Does A CRDT Solve?
 
-Today, document content sync is powered by Yjs.
+Collaborative editors have concurrent edits.
 
-That means:
+Example:
 
-- Quill is still the editor UI
-- Yjs is the shared document model
-- Socket.io is still the transport layer
-- Redis is still the scaling layer for multi-instance delivery
-- MongoDB stores a persisted Yjs snapshot plus a Quill delta mirror
-- timed version checkpoints now sit on top of that persisted state
-- Yjs awareness now carries ephemeral user and cursor state
+```text
+User A types at the start
+User B types at the end
+Both actions happen at nearly the same time
+```
 
-## 2. What is a CRDT?
+A naive backend can overwrite one user's change.
 
-CRDT stands for Conflict-Free Replicated Data Type.
+A CRDT lets all clients merge operations and converge to the same final document.
 
-The simple idea is:
+## Where Yjs Runs
 
-- multiple users can update their local copy
-- updates can arrive in different orders
-- the system still converges to the same final state
+In this project, Yjs runs in the React frontend.
 
-That is powerful for collaborative editing.
+The Java backend does not implement the CRDT algorithm.
 
-## 3. How is that different from the older delta-sync version?
+That is intentional.
 
-Earlier version:
+The split is:
 
-- Quill created deltas
-- clients sent those deltas directly
-- other clients applied those deltas directly
+| Layer | Responsibility |
+|---|---|
+| Yjs in browser | CRDT merge and convergence |
+| Spring Boot | authentication, authorization, routing, persistence |
+| MongoDB | durable Yjs snapshots and version history |
+| Redis | cross-instance fanout |
 
-Current version:
+## What Is A Yjs Update?
 
-- each client keeps a local Yjs document
-- Quill is bound to that shared Yjs text
-- clients exchange Yjs updates instead of raw editor deltas
-- the document converges through the CRDT model itself
+A Yjs update is a compact binary change.
 
-So the difference is:
+Because the Java WebSocket protocol uses JSON, the frontend sends binary Yjs updates as Base64:
 
-- older version: event-based delta sync
-- current version: CRDT-based shared document sync
+```json
+{
+  "update": {
+    "__binaryBase64": "..."
+  }
+}
+```
 
-## 4. What is Yjs?
+The Java backend treats this as an opaque payload.
 
-Yjs is a popular CRDT library for collaborative applications.
+It does not parse or modify the CRDT operation.
 
-It is commonly used for:
+## Persistence
 
-- collaborative text editors
-- whiteboards
-- shared data structures
-- awareness features like presence or cursors
+The frontend periodically sends:
 
-Why Yjs is a strong choice:
+* full Yjs snapshot as Base64
+* Quill delta mirror for readability/debugging
 
-- mature ecosystem
-- good performance
-- widely recognized in collaborative app development
+MongoDB stores both.
 
-## 5. What Yjs adds to this project
+## Restore
 
-Yjs improves:
+When a version is restored:
 
-- conflict handling
-- collaboration correctness
-- offline-friendly behavior
-- eventual convergence of shared state
+1. Java backend loads the stored Yjs snapshot.
+2. Java backend broadcasts `document-restored`.
+3. Every browser rebuilds its Yjs document from that snapshot.
 
-It also gives a stronger architecture story in interviews because sending realtime events is no longer the whole collaboration model.
+## Interview Answer
 
-## 6. What is awareness in Yjs?
-
-Yjs separates the shared document from temporary user state.
-
-Examples of temporary user state:
-
-- username
-- cursor position
-- selection
-- presence status
-
-This temporary state is often called awareness.
-
-That is useful because:
-
-- document content should be persisted
-- cursor positions should be live but not stored as document content
-
-## 7. How this project uses Yjs right now
-
-High level:
-
-1. The backend loads a persisted Yjs baseline, or converts a legacy Quill delta document into Yjs.
-2. The frontend creates one `Y.Doc` per open document.
-3. `QuillBinding` binds Quill to `ydoc.getText("quill")`.
-4. Local Yjs updates are sent over Socket.io with `yjs-update`.
-5. Remote clients apply those updates into their own Yjs document.
-6. New clients can request a live peer catch-up after the persisted baseline loads.
-7. MongoDB keeps timed checkpoints so older states can be restored live for the whole room.
-
-The current cursor work is still relevant because:
-
-- `CursorManager` still owns the DOM-heavy marker rendering path
-- presence still stays separate from persisted document content
-- cursor drift correction is still useful even when awareness is the shared presence model
-
-## 8. OT vs CRDT in simple words
-
-You may hear both OT and CRDT in collaborative editing discussions.
-
-Very simple comparison:
-
-- OT transforms operations relative to each other
-- CRDTs design the data model so replicas converge automatically
-
-You can now say:
-
-> The current editor uses Yjs for CRDT-based content sync and Yjs awareness for ephemeral collaborator state like names and cursors.
-
-That is a strong and honest answer.
-
-## 9. Why Yjs is a strong resume upgrade
-
-It moves the project from:
-
-- event-driven collaboration demo
-
-toward:
-
-- real shared-state collaboration engineering
-
-That matters because it shows you understand that sending events is not the same as solving distributed state convergence.
-
-## 10. Interview-ready explanation
-
-You can say:
-
-> The current editor uses Yjs for CRDT-based content sync over our existing Socket.io transport, and it now uses Yjs awareness for ephemeral collaborator presence and cursor state. Redis still scales the transport layer across backend instances, while MongoDB persists only the document state and restoreable history.
-
-## 11. What is still left after this phase
-
-The next meaningful upgrades are:
-
-- Dockerized deployment
-- authenticated user identity and document-level access control
-
-## 12. What to read next
-
-If you want system-design context after this, read:
-
-- [System Design Interview Guide](./SYSTEM_DESIGN_INTERVIEW_GUIDE.md)
+> Yjs handles CRDT correctness in the browser. The Java backend treats Yjs updates as opaque binary payloads and focuses on secure routing, Redis fanout, persistence, and restore.

@@ -1,88 +1,88 @@
 # Learning Path
 
-This file is the best place to start if you want to understand the project from basics to interview level.
+Use this order to study the project for Java backend interviews.
 
-The idea is simple:
-
-- first understand what the app does
-- then understand how real-time collaboration works
-- then understand how scaling works
-- then understand what the next upgrades mean
-
-## Recommended Reading Order
-
-### 1. Start with the current project shape
+## 1. Run The Project
 
 Read:
 
-- [Local Dev Setup](./LOCAL_DEV_SETUP.md)
-- [Architecture](./ARCHITECTURE.md)
-- [System Design Interview Guide](./SYSTEM_DESIGN_INTERVIEW_GUIDE.md)
-- [Design Flow](./Design%20Flow.md)
+* [Local Dev Setup](./LOCAL_DEV_SETUP.md)
 
-After this, you should be able to answer:
+Goal:
 
-- How do I start the project locally without MongoDB confusion?
-- What does the app do today?
-- Which parts are already implemented?
-- Which parts are still planned?
-- Which design patterns are used here?
-- How should I talk about this project in HLD and LLD interviews?
+* start MongoDB
+* start Spring Boot
+* start React
+* test one collaborative document
 
-### 2. Learn the real-time basics
+## 2. Understand The Architecture
 
 Read:
 
-- [Realtime Collaboration 101](./REALTIME_COLLABORATION_101.md)
+* [Architecture](./ARCHITECTURE.md)
+* [Design Flow](./Design%20Flow.md)
 
-After this, you should be able to answer:
+Goal:
 
-- What is a WebSocket?
-- Why use Socket.io?
-- What is a room?
-- What is a Quill Delta?
-- Why do remote cursors drift?
+* explain why the backend is Java
+* explain how React, Yjs, Spring Boot, Redis, and MongoDB fit together
+* explain what Java owns versus what Yjs owns
 
-### 3. Learn the scaling layer
-
-Read:
-
-- [Redis Scaling 101](./REDIS_SCALING_101.md)
-
-After this, you should be able to answer:
-
-- Why does a single WebSocket server not scale horizontally by itself?
-- What does Redis pub/sub do here?
-- Why do sticky sessions matter?
-- Why are retry, logging, and graceful shutdown useful?
-
-### 4. Learn the current CRDT layer
+## 3. Learn Realtime Collaboration
 
 Read:
 
-- [CRDT and Yjs 101](./CRDT_YJS_101.md)
+* [Realtime Collaboration 101](./REALTIME_COLLABORATION_101.md)
 
-After this, you should be able to answer:
+Focus on:
 
-- How is Yjs used in the current system?
-- What problem does Yjs solve?
-- What is still left after CRDT content sync?
+* WebSocket basics
+* document rooms
+* event-driven updates
+* cursor and presence lifecycle
 
-### 5. Learn deployment concepts
+## 4. Learn Redis Pub/Sub
 
 Read:
 
-- [Docker and Kubernetes 101](./DOCKER_KUBERNETES_101.md)
+* [Redis Scaling 101](./REDIS_SCALING_101.md)
 
-After this, you should be able to answer:
+Focus on:
 
-- What Docker would add to this project
-- What Kubernetes would add after Docker
-- How this architecture would map to containers and deployments
+* why WebSocket servers need fanout
+* how Pub/Sub helps multiple backend instances
+* what Redis does and does not persist
 
-## Fast Interview Revision Plan
+## 5. Learn Yjs And CRDTs
 
-If you only have 20 to 30 minutes before an interview, read in this order:
+Read:
+
+* [CRDT and Yjs 101](./CRDT_YJS_101.md)
+
+Focus on:
+
+* Yjs runs in the browser
+* Java treats Yjs updates as opaque payloads
+* CRDT convergence is separate from backend routing
+
+## 6. Prepare For Interviews
+
+Read:
+
+* [System Design Interview Guide](./SYSTEM_DESIGN_INTERVIEW_GUIDE.md)
+
+Practice explaining:
+
+* HLD diagram
+* edit flow
+* auth flow
+* Redis scaling flow
+* version restore flow
+* Java package responsibilities
+
+## Fast Revision Plan
+
+If you have 30 minutes before an interview:
 
 1. [Design Flow](./Design%20Flow.md)
 2. [Architecture](./ARCHITECTURE.md)
@@ -90,41 +90,25 @@ If you only have 20 to 30 minutes before an interview, read in this order:
 4. [Redis Scaling 101](./REDIS_SCALING_101.md)
 5. [CRDT and Yjs 101](./CRDT_YJS_101.md)
 
-## What You Can Honestly Claim Today
+## What You Can Honestly Claim
 
-Today you can confidently say:
+* React frontend
+* Java Spring Boot backend
+* Gradle build
+* JWT auth
+* Spring Security
+* Spring WebSocket realtime gateway
+* MongoDB persistence
+* Redis Pub/Sub fanout
+* Yjs CRDT collaboration
+* Yjs awareness presence and cursors
+* version history and live restore
+* Docker Compose packaging
 
-- You built a real-time collaborative editor with React, Quill, Socket.io, and MongoDB
-- You added awareness-based presence and remote cursor tracking with drift correction
-- You modularized the backend
-- You added Redis-based Socket.io scaling support for multi-instance real-time delivery
-- You migrated document content sync to Yjs-based CRDT updates
-- You added timed version history with live restore
-- You added an automated test harness for core backend and frontend collaboration flows
-- You added JWT authentication and document-level owner/editor access control
-- You Dockerized the full stack with frontend, backend, MongoDB, and Redis
+## What Not To Claim
 
-Today you should not claim yet:
-
-- Kubernetes deployment
-- enterprise-grade auth features such as OAuth, password reset, refresh-token rotation, team invites, or audit logs
-
-Those are still future upgrades.
-
-## How To Use These Docs
-
-Do not try to memorize every sentence.
-
-Instead, focus on these three layers:
-
-1. Problem
-2. Solution
-3. Tradeoff
-
-Example:
-
-- Problem: multiple backend instances cannot share socket events by default
-- Solution: use the Socket.io Redis adapter
-- Tradeoff: Redis adds another moving part and operational complexity
-
-If you can explain those three things clearly, you will sound much stronger in interviews.
+* Kubernetes is implemented
+* OAuth is implemented
+* password reset is implemented
+* Java computes CRDT merges internally
+* distributed tracing is implemented
