@@ -1,222 +1,258 @@
 # Collab Editor
 
-## Setup
-1. `npm install`
-2. `cd backend && npm install`
-3. `cd frontend && npm install`
+A real-time collaborative editor with a React frontend and a Java Spring Boot backend.
 
-## Local MongoDB Workflow
-Use the root helper scripts for local development:
+The backend story is intentionally Java-focused for backend and system-design interviews:
 
-* `npm run mongo:start`
-* `npm run mongo:status`
-* `npm run mongo:stop`
-* `npm run mongo:reset`
+```text
+React + Quill + Yjs
+        v
+Native WebSocket JSON protocol
+        v
+Spring Boot realtime gateway
+        v
+Redis Pub/Sub fanout
+        v
+MongoDB persistence
+```
 
-Notes:
+## Current Tech Stack
 
-* The default local connection string is `mongodb://127.0.0.1:27017/collab-editor`.
-* Local MongoDB data is stored in `%LOCALAPPDATA%\collab-editor\mongo\data`.
-* Local MongoDB logs are written to `%TEMP%\collab-editor-mongod.log`, not inside the repo.
-* You do not need to keep a dedicated terminal open for Mongo if you use `npm run mongo:start`.
-* MongoDB still needs to be running while the backend is running.
-* The old repo-local `.local` Mongo folder is no longer needed by the normal workflow.
-* If your machine already has the Windows `MongoDB` service running, you can skip `npm run mongo:start` entirely.
-* `npm run mongo:reset` is only for the repo-managed fallback MongoDB process, not for a service-managed MongoDB install.
-
-## Development
-1. Make sure MongoDB is available:
-   * If the Windows `MongoDB` service is already running, use that.
-   * Otherwise start the repo-managed fallback process with `npm run mongo:start`.
-2. Run backend: `cd backend && npm run devStart`
-3. Run frontend: `cd frontend && npm start`
-
-## Docker Compose
-Use this when you want the packaged full stack instead of separate local processes.
-
-1. Make sure Docker Desktop and the Docker engine are running.
-2. Start the stack: `npm run docker:up`
-3. Open `http://localhost:3000`
-4. Follow logs if needed: `npm run docker:logs`
-5. Stop the stack: `npm run docker:down`
-
-What runs in this mode:
-
-* `frontend`: production React build served by Nginx
-* `backend`: Node.js Socket.io server
-* `mongodb`: persistent document store
-* `redis`: realtime scaling layer
-
-Notes:
-
-* The frontend uses same-origin Socket.io in Docker mode, so Nginx proxies `/socket.io/` to the backend container.
-* The backend also exposes `GET /healthz` for container health checks.
-* `npm run docker:down` keeps MongoDB data by default because the Compose volume is preserved.
-
-## Fresh Start
-If you want to start with a clean local database:
-
-1. If you are using the repo-managed fallback MongoDB process:
-   * `npm run mongo:stop`
-   * `npm run mongo:reset`
-   * `npm run mongo:start`
-2. If you are using the Windows `MongoDB` service:
-   * do not use `mongo:reset`
-   * clear the `collab-editor` database from MongoDB Compass if you need a clean start
-3. `cd backend && npm run devStart`
-4. `cd frontend && npm start`
+* Frontend: React, Quill, Yjs, Yjs Awareness
+* Backend: Java 21, Spring Boot, Spring Security, Spring WebSocket
+* Build: Gradle wrapper
+* Database: MongoDB
+* Scaling layer: Redis Pub/Sub
+* Auth: JWT + BCrypt password hashing
+* Packaging: Docker Compose with frontend, backend, MongoDB, and Redis
 
 ## Features
-* JWT-based registration and login
+
+* JWT registration and login
 * Document ownership with owner/editor access control
 * Owner-only sharing by collaborator email
-* Yjs-based CRDT content sync over Socket.io
-* Yjs awareness-based live cursor sync and active collaborator roster
-* Delta-aware remote cursor drift correction while users type concurrently
-* MongoDB-backed document persistence with periodic autosave
-* Timed version checkpoints with live restore for all active collaborators
-* Production-style Docker Compose packaging for the full stack
+* CRDT-based document collaboration using Yjs
+* Native WebSocket message relay through Spring Boot
+* Yjs awareness-based active collaborator roster and remote cursors
+* Redis Pub/Sub fanout for multi-backend realtime propagation
+* MongoDB autosave with active Yjs snapshots
+* Timed version checkpoints and live restore
+* Health, readiness, and metrics endpoints
+* Docker Compose full-stack runtime
 
-## Content Sync Events
-* `load-document`: receive the Yjs baseline payload for the active document
-* `yjs-update`: send or receive CRDT updates for document content
-* `request-document-sync`: request a live Yjs catch-up snapshot from existing peers
-* `document-sync`: receive the first valid peer snapshot for a newly joined client
-* `save-document`: persist a Yjs snapshot plus a Quill delta mirror
+## Local Setup
 
-## Version History Events
-* `get-document-history`: request version metadata for the active document
-* `document-history`: receive the current version list for the sidebar
-* `document-history-updated`: receive room-wide history refreshes after checkpoints or restore
-* `restore-version`: request a live restore for the selected version
-* `document-restored`: receive the restored Yjs snapshot for the active room
+Install:
 
-## Presence Events
-* `join-document`: register collaborator metadata for the active document room
-* `awareness-update`: send or receive Yjs awareness updates for cursors and live presence
-* `request-awareness-sync`: request an awareness snapshot from active peers when a collaborator joins
-* `awareness-sync`: send the current awareness snapshot back to the requesting collaborator
-* `awareness-remove`: remove stale awareness states when collaborators leave, switch documents, or disconnect
-* `awareness-leave`: explicitly clear the current session's ephemeral presence before teardown
+* Java 21
+* Node.js for React frontend tooling
+* MongoDB, or use the repo helper scripts
+* Docker Desktop if you want Redis or Docker Compose mode
 
-## Auth, Access, and Scaling Notes
-* Users register or log in through JWT-backed auth endpoints.
-* The token and sanitized user profile are persisted in `localStorage`, so the same browser profile stays logged in across tabs and documents.
-* Each document has one owner and zero or more editor collaborators.
-* A newly created or legacy unowned document is claimed by the first authenticated user who opens it.
-* Only the owner can share document access with an existing registered user by email.
-* Protected REST endpoints and Socket.io handshakes both validate the JWT before allowing document access.
-* To test different collaborators, use two different browser storage contexts such as normal window + incognito, two browser profiles, or two different browsers, then share the document with the second registered user.
-* In production, a load balancer must support sticky sessions or use a WebSocket-aware proxy.
+No global Gradle install is required. Use `backend/gradlew.bat` on Windows or `backend/gradlew` on Unix-like shells.
 
-## Manual Test Flow
-1. Make sure MongoDB is available through your normal local flow.
-2. Register or log in as user A.
-3. Create or open a document and verify user A is shown as the owner.
-4. Register or log in as user B in a different browser storage context.
-5. Before user B can open user A's document, share the document from user A's access panel using user B's email.
-6. Open the same shared document as user B and verify text sync works live.
-7. Type concurrently in both sessions and verify the document converges cleanly instead of drifting.
-8. Open a different document as either user and verify it stays isolated.
-9. Type, wait 2 seconds, refresh, and verify autosave restores the content.
-10. Verify both users appear in the active-collaborators roster.
-11. Move the caret in one editor and verify the other client shows the remote cursor label.
-12. Blur one editor, close one tab, or switch one tab to a different document and verify the remote cursor disappears and the roster updates.
-13. Join a third authorized client after active edits but before the next autosave and verify it catches up to the latest in-memory state.
-14. Keep editing for more than 30 seconds and verify a checkpoint appears in the history panel.
-15. Restore an older version and verify every open client on the same document updates immediately.
-16. Refresh after restore and verify the restored content persists.
-17. If you already have older documents saved before the Yjs migration, reopen one while authenticated and verify it is claimed, resaves, and starts accumulating history correctly.
-18. After Redis is running locally, use the multi-instance flow below to verify cross-backend sync.
+Install frontend dependencies:
 
-## Automated Testing
-Use the automated harness for fast feedback before running browser smoke tests:
+```bash
+cd frontend
+npm install
+```
 
-* Backend service + socket tests: `cd backend && npm test`
-* Frontend version-history panel tests: `cd frontend && npm run test:ci`
-* Combined unit/integration run from the repo root: `npm test`
-* Single-node browser E2E smoke: `npm run e2e:single`
-* Redis-backed browser E2E smoke: `npm run e2e:redis`
-* Docker Compose browser E2E smoke: `npm run e2e:docker`
+## Local MongoDB Workflow
 
-Current automated coverage includes:
+From the repo root:
 
-* auth service registration/login/token validation
-* document ownership, listing, sharing, and access enforcement
-* checkpoint creation and retention rules
-* restore-backup behavior
-* history fetch and room-wide restore socket events
-* presence-roster rendering and version-history sidebar behavior
-* real browser multi-context collaboration smoke in single-node mode with authenticated sharing
-* Redis-backed cross-backend browser smoke with authenticated sharing when Docker Desktop and the engine are running
-* Docker Compose full-stack browser smoke through the packaged Nginx + backend stack
-
-## Redis Scaling
-* Set `REDIS_URL=redis://localhost:6379` to enable the Socket.io Redis adapter.
-* When `REDIS_URL` is not set, the backend stays in single-node mode.
-* When `REDIS_URL` is set, the backend retries Redis connection with bounded backoff and fails startup if Redis never becomes available.
-* For local verification on this machine, Redis is started with Docker:
-  * first run: `docker run --name collab-redis -p 6379:6379 -d redis:7`
-  * later runs: `docker start collab-redis`
-  * stop Redis for outage testing: `docker stop collab-redis`
-* `docker stop collab-redis` is the recommended fail-loud test. Pausing Docker Engine can freeze dependencies instead of producing a clean Redis connection failure.
-* Backend logs now call out Redis mode explicitly:
-  * `[Redis] Running in single-node mode`
-  * `[Redis] Connected to pub/sub`
-  * `[Redis] Adapter enabled`
-
-## Single-Node Without Redis
-Use this when you want the app to run without the scaling layer:
-
-1. Make sure MongoDB is running.
-2. Start backend: `cd backend && npm run devStart`
-3. Start frontend: `cd frontend && npm start`
-
-This mode still supports:
-
-* document editing
-* awareness-based presence and remote cursors
-* autosave and reload
-
-## Multi-Instance Local Verification
-1. Start Redis on port `6379`:
-   * first time: `docker run --name collab-redis -p 6379:6379 -d redis:7`
-   * later: `docker start collab-redis`
-2. Start backend instance 1: `cd backend && npm run devStart:redis`
-3. Start backend instance 2: `cd backend && npm run devStart:redis:3002`
-4. Start frontend instance 1: `cd frontend && npm start`
-5. Start frontend instance 2: `cd frontend && npm run start:socket3002`
-6. Register or log in as user A in one frontend and user B in the other frontend.
-7. Create/open a document as user A, then share that document with user B's email from the access panel.
-8. Open the same document in both frontends and verify text sync, concurrent typing convergence, active-user roster sync, cursor sync, and document persistence across backend instances.
-9. Keep editing for more than 30 seconds and verify the history list updates across both frontend instances.
-10. Restore a version from one frontend and verify the other frontend receives both the restored content and updated history list.
-11. Join a third authorized client after active edits but before autosave and verify peer catch-up still brings it to the latest state.
-12. Open a different document in one frontend and verify document isolation still holds.
-13. Stop Redis with `docker stop collab-redis` and confirm `npm run devStart:redis` fails loudly instead of silently falling back.
+```bash
+npm run mongo:start
+npm run mongo:status
+npm run mongo:stop
+npm run mongo:reset
+```
 
 Notes:
 
-* `http://localhost:3000` and `http://localhost:3003` are both allowed by default in local multi-instance mode.
-* Because the ports differ, they also use different browser storage and show different collaborator identities naturally.
+* Default local MongoDB URI: `mongodb://127.0.0.1:27017/collab-editor`
+* Repo-managed MongoDB data lives in `%LOCALAPPDATA%\collab-editor\mongo\data`
+* Repo-managed MongoDB logs live in `%TEMP%\collab-editor-mongod.log`
+* If your Windows `MongoDB` service is already running, you can skip `npm run mongo:start`
 
-## Environment Variables
-* Backend
-  * `SOCKET_PORT`: override backend Socket.io port
-  * `CLIENT_ORIGIN`: comma-separated frontend origins for Socket.io CORS
-  * `MONGODB_URI`: MongoDB connection string
-  * `REDIS_URL`: enables Redis pub/sub scaling
-  * `CHECKPOINT_INTERVAL_MS`: override timed version checkpoint cadence
-  * `JWT_SECRET`: secret used to sign auth tokens; replace the dev default in any shared environment
-  * `JWT_EXPIRES_IN`: token lifetime, defaulting to `7d`
-* Frontend
-  * `REACT_APP_API_URL`: override the REST API base URL for auth and document metadata
-  * `REACT_APP_SOCKET_URL`: override the Socket.io server URL for local multi-instance verification
-  * `REACT_APP_SAVE_INTERVAL_MS`: override autosave cadence at build time
+## Single-Backend Development
+
+Terminal 1:
+
+```bash
+npm run mongo:start
+```
+
+Terminal 2:
+
+```bash
+cd backend
+.\gradlew.bat bootRun
+```
+
+Terminal 3:
+
+```bash
+cd frontend
+npm start
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+On Unix-like shells, use `./gradlew bootRun` instead of `.\gradlew.bat bootRun`.
+
+## Redis-Scaled Development
+
+Start Redis:
+
+```bash
+docker start collab-redis
+```
+
+If the Redis container does not exist yet:
+
+```bash
+docker run --name collab-redis -p 6379:6379 -d redis:7
+```
+
+Backend instance 1:
+
+```bash
+cd backend
+.\gradlew.bat bootRun --args="--SOCKET_PORT=3001 --REDIS_ENABLED=true --REDIS_URL=redis://127.0.0.1:6379"
+```
+
+Backend instance 2:
+
+```bash
+cd backend
+.\gradlew.bat bootRun --args="--SOCKET_PORT=3002 --REDIS_ENABLED=true --REDIS_URL=redis://127.0.0.1:6379"
+```
+
+Frontend instance 1:
+
+```bash
+cd frontend
+npm start
+```
+
+Frontend instance 2:
+
+```bash
+cd frontend
+npm run start:backend3002
+```
+
+Open `http://localhost:3000` and `http://localhost:3003`.
+
+## Docker Compose
+
+From the repo root:
+
+```bash
+npm run docker:up
+npm run docker:logs
+npm run docker:down
+```
+
+Docker Compose runs:
+
+* React production build through Nginx
+* Spring Boot backend
+* MongoDB
+* Redis
+
+The frontend proxies `/api/` and `/ws` to the Java backend.
+
+## Backend Runtime Endpoints
+
+* `GET /healthz`: liveness
+* `GET /readyz`: MongoDB readiness
+* `GET /metrics`: Prometheus-style operational metrics
+* `GET /api/auth/me`: authenticated current-user check
+* `GET /api/documents`: list accessible documents
+* `POST /api/documents`: create document
+* `GET /api/documents/{documentId}`: document metadata
+* `POST /api/documents/{documentId}/share`: owner-only sharing
+
+## WebSocket Protocol
+
+The frontend connects to:
+
+```text
+ws://localhost:3001/ws?token=<jwt>
+```
+
+Messages are JSON envelopes:
+
+```json
+{
+  "event": "yjs-update",
+  "payload": {
+    "update": {
+      "__binaryBase64": "..."
+    }
+  }
+}
+```
+
+Main events:
+
+* `get-document`
+* `load-document`
+* `join-document`
+* `yjs-update`
+* `request-document-sync`
+* `document-sync`
+* `awareness-update`
+* `request-awareness-sync`
+* `awareness-sync`
+* `awareness-remove`
+* `awareness-leave`
+* `get-document-history`
+* `document-history`
+* `document-history-updated`
+* `restore-version`
+* `document-restored`
+* `save-document`
+
+## Testing
+
+Backend:
+
+```bash
+npm run test:backend
+```
+
+Frontend:
+
+```bash
+npm run test:frontend
+cd frontend
+npm run build
+```
+
+Browser smoke tests:
+
+```bash
+npm run e2e:single
+npm run e2e:redis
+npm run e2e:docker
+```
+
+## Interview One-Liner
+
+> I built a CRDT-based collaborative editor with React, Yjs, Java Spring Boot WebSockets, Redis Pub/Sub, MongoDB, JWT authentication, document-level access control, version history, live restore, and Docker packaging.
 
 ## Documentation
-* Architecture overview: `docs/ARCHITECTURE.md`
-* Change history and interview notes: `docs/Design Flow.md`
-* Local setup and test runbook: `docs/LOCAL_DEV_SETUP.md`
-* HLD and LLD interview guide: `docs/SYSTEM_DESIGN_INTERVIEW_GUIDE.md`
-* Beginner study guide: `docs/LEARNING_PATH.md`
+
+* Architecture: `docs/ARCHITECTURE.md`
+* Java learning story: `docs/Design Flow.md`
+* Local runbook: `docs/LOCAL_DEV_SETUP.md`
+* Interview guide: `docs/SYSTEM_DESIGN_INTERVIEW_GUIDE.md`
+* Learning path: `docs/LEARNING_PATH.md`

@@ -1,427 +1,206 @@
 # System Design Interview Guide
 
-Use this document after you read [Architecture](./ARCHITECTURE.md).
+This guide is written for the Java Spring Boot backend version.
 
-This file is for interview preparation, not for describing every implementation detail.
-It focuses on:
+## 30-Second HLD Answer
 
-- which design patterns the project uses
-- how to explain the system at HLD level
-- how to explain the system at LLD level
-- what questions an interviewer is likely to ask
-- what you can honestly claim today
+> The system is a collaborative document editor. The frontend uses React, Quill, and Yjs. Yjs handles CRDT-based convergence in the browser. The backend is Java Spring Boot. It authenticates users with JWT, authorizes document access, maintains WebSocket sessions, routes messages by document room, persists Yjs snapshots and version history in MongoDB, and uses Redis Pub/Sub to propagate realtime events across multiple backend instances.
 
-## First Honest Summary
+## HLD Components
 
-Today, this project is best described as:
+| Component | Purpose |
+|---|---|
+| React | UI, auth, dashboard, editor shell |
+| Quill | Rich text editor |
+| Yjs | CRDT collaboration engine |
+| Spring Boot | Java backend and realtime gateway |
+| Spring Security | JWT authentication |
+| Spring WebSocket | Persistent realtime sessions |
+| MongoDB | Users, documents, versions |
+| Redis Pub/Sub | Cross-instance event fanout |
+| Docker Compose | Local production-style runtime |
 
-- a layered real-time collaborative editor
-- using Socket.io for event-driven communication
-- using Yjs for CRDT-based content sync
-- using Yjs awareness for ephemeral presence and cursor state
-- using MongoDB for persistence
-- using Redis pub/sub for horizontal scaling of Socket.io events
-- using timed version history with live restore
-- using a dedicated cursor manager with drift correction on top of awareness state
-- using JWT authentication with document owner/editor authorization
+## Edit Flow
 
-Today, it is not yet:
+1. User types in Quill.
+2. Yjs updates the local shared document.
+3. React sends a WebSocket JSON message to Spring Boot.
+4. Spring Boot verifies the authenticated session and document access.
+5. Spring Boot sends the update to other users in the same document room.
+6. Redis Pub/Sub forwards the event to other backend instances if scaling mode is enabled.
+7. Other browsers apply the Yjs update.
 
-- a fully production-hardened auth platform with password reset, OAuth, refresh-token rotation, and audit logs
-- a production container orchestration setup beyond Docker Compose
+## Why Java Backend?
 
-That honesty helps a lot in interviews.
+Use this answer:
 
-## Design Patterns Used In This Project
+> I chose Java Spring Boot for the backend because it gives a production-style backend stack with strong support for security, WebSocket gateways, Redis, MongoDB, Gradle, testing, and operational endpoints. React remains JavaScript because it is the frontend layer, but backend system-design concepts are implemented in Java.
 
-### 1. Layered architecture
+## Why Yjs If Backend Is Java?
 
-The backend is split into:
+Yjs is still useful because CRDT merging belongs close to the editor state in the browser.
 
-- config
-- models
-- services
-- controllers
-- websocket handlers
+The Java backend does not need to understand CRDT internals.
 
-Why this matters:
+It handles:
 
-- responsibilities are separated
-- business logic is not mixed directly into the server bootstrap
-- realtime transport and persistence can evolve independently
+* authentication
+* authorization
+* room routing
+* Redis fanout
+* persistence
+* restore broadcasts
 
-What to say:
+Good answer:
 
-> I refactored the backend into a layered structure so connection setup, socket handling, persistence, and document operations were not coupled in one file.
+> Yjs owns convergence. Java owns backend control-plane responsibilities: who is allowed, where messages go, what gets persisted, and how events scale across instances.
 
-### 2. Event-driven architecture
+## Redis Pub/Sub Explanation
 
-The realtime system is built around socket events such as:
+Problem:
 
-- `get-document`
-- `load-document`
-- `yjs-update`
-- `request-document-sync`
-- `document-sync`
-- `get-document-history`
-- `document-history`
-- `document-history-updated`
-- `restore-version`
-- `document-restored`
-- `join-document`
-- `awareness-update`
-- `request-awareness-sync`
-- `awareness-sync`
-- `awareness-remove`
-- `awareness-leave`
+```text
+User A connected to backend A
+User B connected to backend B
+```
 
-Why this matters:
+Without Redis, backend A cannot directly send a WebSocket frame to users connected to backend B.
 
-- collaborative editing is naturally event-driven
-- clients react to state changes instead of polling
-- the model fits WebSocket communication well
+Solution:
 
-What to say:
+```text
+Backend A publishes event -> Redis -> Backend B receives event -> Backend B sends to its local clients
+```
 
-> The editor is event-driven. User actions become socket events, and the backend routes those events to the right document room.
+Good answer:
 
-### 3. Pub/sub pattern
+> Redis Pub/Sub is the cross-instance fanout layer for WebSocket events. It lets the system scale Spring Boot backend instances horizontally while preserving room-scoped realtime delivery.
 
-Redis scaling uses pub/sub behind the Socket.io adapter.
+## LLD: Backend Package Responsibilities
 
-Why this matters:
+| Package | Responsibility |
+|---|---|
+| `auth` | Register, login, JWT issuing, rate limiting |
+| `security` | JWT authentication filter and authenticated principal |
+| `document` | Document metadata, access control, save, history, restore |
+| `realtime` | WebSocket sessions, room maps, peer sync, Redis fanout |
+| `config` | Spring Security, CORS, WebSocket, Redis, Mongo auditing |
+| `ops` | Health, readiness, metrics |
 
-- one backend instance alone cannot share socket events with another
-- Redis becomes the event propagation layer between Node.js processes
+## LLD: Document Access Control
 
-What to say:
+Rules:
 
-> I used pub/sub through the Socket.io Redis adapter so socket events could propagate across multiple backend instances.
+* every REST request must have a valid JWT
+* every WebSocket connection must have a valid JWT
+* every document has one owner
+* owner can share by email
+* collaborators can edit
+* unauthorized users cannot load or join the document room
 
-### 4. Adapter pattern
+Why service-layer authorization matters:
 
-The Redis integration uses the Socket.io Redis adapter.
+> Authorization lives in `DocumentService`, not just the frontend, so direct API or WebSocket calls still go through the same permission checks.
 
-Why this matters:
+## LLD: Version History
 
-- the core socket code does not need to know how cross-instance delivery is implemented
-- Socket.io keeps the same room and emit semantics while the adapter handles distribution
+The active document stores:
 
-What to say:
+* latest Yjs snapshot
+* Quill delta mirror
+* document metadata
 
-> The adapter pattern let me add horizontal scaling without rewriting the socket event layer.
+Version entries store:
 
-### 5. Manager pattern on the frontend
+* version id
+* timestamp
+* saved by
+* source
+* Yjs snapshot
+* Quill delta mirror
 
-`CursorManager` is effectively a small manager object for remote cursor state and rendering.
+Restore flow:
 
-Why this matters:
+1. user clicks restore
+2. client emits `restore-version`
+3. Java backend validates access
+4. backend saves a restore backup if needed
+5. backend replaces active snapshot
+6. backend broadcasts `document-restored`
+7. all clients rebuild their Yjs document from the restored snapshot
 
-- cursor rendering is isolated from the main editor component
-- DOM-heavy cursor updates are handled outside normal React rendering
-- batching with `requestAnimationFrame` improves rendering behavior
+## LLD: Presence And Cursors
 
-What to say:
+Presence is ephemeral.
 
-> I extracted remote cursor logic into a dedicated manager so cursor transforms, lifecycle cleanup, and DOM rendering were handled in one place.
+It is not stored in MongoDB.
 
-### 6. Room-based partitioning
+Flow:
 
-Each document uses a Socket.io room keyed by `documentId`.
+1. frontend updates Yjs awareness state
+2. frontend sends `awareness-update`
+3. Java backend routes the update to the document room
+4. other clients update active user roster and remote cursor markers
+5. disconnect or document switch emits `awareness-remove`
 
-Why this matters:
+## LLD: Operational Endpoints
 
-- only users in the same document receive the same content and awareness events
-- different documents remain isolated without needing separate servers
+* `/healthz`: is the Java process alive?
+* `/readyz`: is MongoDB available?
+* `/metrics`: how many sockets, rooms, memory, Redis mode, and runtime signals?
 
-What to say:
+Good answer:
 
-> I partitioned realtime traffic by document room so collaboration is scoped cleanly and isolation comes from the transport layer itself.
+> I separated liveness from readiness because a process can be alive but not ready to serve traffic if MongoDB is down.
 
-### 7. Middleware pattern
+## Design Patterns Used
 
-HTTP requests and Socket.io handshakes use authentication middleware before reaching document logic.
+* Layered architecture
+* Service-layer authorization
+* Event-driven WebSocket communication
+* Room-based partitioning
+* Pub/Sub fanout with Redis
+* Adapter-like separation between Yjs frontend updates and Java backend routing
+* Repository pattern through Spring Data MongoDB
+* Middleware/filter pattern through Spring Security
 
-Why this matters:
+## Questions Interviewers May Ask
 
-- auth logic is centralized instead of repeated in every handler
-- sockets cannot join document rooms unless the JWT is valid
-- REST APIs and realtime collaboration share the same identity model
+* Why Java Spring Boot for the backend?
+* Why Yjs instead of implementing CRDT in Java?
+* How does Redis help WebSocket scaling?
+* How do you prevent unauthorized document access?
+* How does a new user catch up to the latest in-memory state?
+* How does version restore work without refreshing?
+* What happens if Redis is down?
+* What happens if MongoDB is down?
+* Why store snapshots instead of every operation?
+* What metrics would you monitor?
 
-What to say:
+## What You Can Claim
 
-> I used middleware for both REST and Socket.io authentication so downstream document logic always receives a trusted authenticated user.
+You can claim:
 
-### 8. Service-layer authorization
+* Java Spring Boot backend
+* JWT authentication
+* document-level authorization
+* WebSocket realtime gateway
+* Redis Pub/Sub horizontal fanout
+* MongoDB persistence
+* Yjs CRDT collaboration
+* awareness-based presence and cursors
+* version history and live restore
+* Docker Compose packaging
+* health, readiness, and metrics endpoints
 
-Document permissions are enforced inside `documentService`, not only in the UI.
+Do not claim:
 
-Why this matters:
+* Kubernetes is implemented
+* OAuth is implemented
+* password reset is implemented
+* Java performs CRDT merges internally
+* distributed tracing is implemented
 
-- clients cannot bypass access control by emitting socket events directly
-- load, save, history, restore, and share operations use the same permission rules
-- backend tests can validate authorization without depending on React
+## Best Resume Bullet
 
-What to say:
-
-> I kept authorization in the service layer so every document operation has one consistent owner/editor access-control path.
-
-## HLD: How To Explain The System
-
-At high level, explain the system in 5 blocks:
-
-1. client
-2. realtime gateway
-3. shared content model
-4. scaling layer
-5. persistence layer
-
-Short version:
-
-> The client is a React and Quill editor with auth, access, presence, and history sidebars. Quill is bound to a Yjs shared document for content sync, and a Yjs awareness instance carries ephemeral collaborator state like name and cursor position. The client talks to a Node.js Socket.io backend using a JWT-authenticated socket handshake. Each document maps to a Socket.io room after the backend confirms owner/editor access. MongoDB stores users, document access metadata, the active Yjs snapshot, and timed checkpoints for restore. When Redis is enabled, Socket.io uses Redis pub/sub so multiple backend instances can share realtime content and awareness events.
-
-### HLD questions an interviewer may ask
-
-#### What are the main system components?
-
-Expected answer:
-
-- React + Quill frontend
-- JWT authentication and protected document APIs
-- Yjs shared content model
-- Socket.io backend
-- Redis as scaling layer
-- MongoDB for persistence and version history
-
-#### How does realtime editing work end to end?
-
-Expected answer:
-
-- user types in Quill
-- Quill is bound to a local Yjs document
-- frontend emits a Yjs update
-- backend broadcasts the update to the document room
-- other clients apply the Yjs update
-- local awareness state separately tracks user metadata and cursor position
-- the document is autosaved periodically to MongoDB
-- timed checkpoints provide restoreable history on top of the live state
-
-#### How does access control work?
-
-Expected answer:
-
-- users register or log in and receive a JWT
-- REST requests use `Authorization: Bearer <token>`
-- Socket.io sends the token in the handshake auth payload
-- backend middleware resolves the authenticated user
-- the document service checks whether the user is the owner or an editor collaborator before load, save, history, restore, or share
-- only owners can share documents with existing users by email
-
-#### Why is Redis needed?
-
-Expected answer:
-
-- without Redis, one backend instance cannot deliver events to sockets connected to another instance
-- Redis enables cross-instance event propagation
-
-#### Why keep Socket.io even after adding Yjs?
-
-Expected answer:
-
-- Yjs solves shared-state convergence
-- Socket.io still handles transport, rooms, reconnection behavior, and awareness transport
-- this let the project keep its scaling story while upgrading the content model underneath it
-
-#### What are the current limitations?
-
-Expected answer:
-
-- auth is JWT-based, but still not enterprise-grade auth
-- deployment automation is still limited compared with a full production platform, even though the stack is now containerized with Docker Compose
-- auth is intentionally simple and does not yet include reset flows, OAuth, refresh-token rotation, read-only roles, teams, or audit logs
-
-#### How would you scale this further?
-
-Expected answer:
-
-- keep Redis for transport scaling
-- build on the existing Dockerized stack
-- add richer auth features such as invitations, roles, and audit logs
-- later add orchestrated deployment and observability
-
-## LLD: How To Explain The System
-
-At low level, interviewers usually care about:
-
-- event contracts
-- state ownership
-- data model
-- lifecycle cleanup
-- edge cases
-
-### LLD areas they may ask about
-
-#### How do you load a document?
-
-Expected answer:
-
-- client emits `get-document(documentId)`
-- backend authenticates the socket and finds or creates the MongoDB document
-- backend verifies owner/editor access or claims a legacy unowned document for the first authenticated opener
-- backend loads a persisted Yjs snapshot, or converts a legacy Quill delta document into Yjs
-- socket joins the room
-- backend emits `load-document`
-- frontend applies the Yjs baseline and enables editing
-- backend can request a live peer sync so the client catches up beyond the last autosave
-
-#### How does version history work?
-
-Expected answer:
-
-- the active document state is still autosaved every 2 seconds
-- the backend creates a checkpoint only when content changed and 30 seconds have passed since the last checkpoint
-- MongoDB keeps the latest 20 versions per document
-- restore emits a room-wide update so all collaborators switch to the selected snapshot
-
-#### How do you avoid leaking edits between documents?
-
-Expected answer:
-
-- each socket stores an active `documentId`
-- content and awareness events are emitted to that document room only
-- switching documents leaves the old room and joins the new one
-
-#### How are cursors implemented?
-
-Expected answer:
-
-- client updates local Yjs awareness state with `{ user, cursor }`
-- frontend emits throttled `awareness-update` messages over Socket.io
-- backend forwards awareness updates to the same room except the sender
-- frontend derives the active-collaborators roster from awareness state and stores remote cursor render state in `CursorManager`
-- `CursorManager` renders DOM markers and cleans them up when awareness state is removed or the session changes
-
-#### How do you reduce cursor drift?
-
-Expected answer:
-
-- when text changes arrive, remote cursor positions are transformed using Quill Delta position transforms
-- this keeps cursors visually aligned while awareness updates continue to arrive asynchronously
-
-#### Why not re-render cursors with React state on every update?
-
-Expected answer:
-
-- remote cursor updates can be frequent
-- imperative DOM markers are cheaper here
-- `requestAnimationFrame` batching reduces layout thrashing
-
-#### Why autosave every 2 seconds instead of every keystroke?
-
-Expected answer:
-
-- writing every keystroke would create unnecessary database pressure
-- periodic autosave is a simpler tradeoff for the current phase
-- realtime sync and persistence are intentionally decoupled
-
-#### What does MongoDB store?
-
-Expected answer:
-
-- one document per editor document
-- a Yjs snapshot as the primary content format
-- a Quill delta mirror for compatibility and inspection
-- timed checkpoint versions plus restore-backup snapshots
-
-#### What happens when Redis is down?
-
-Expected answer:
-
-- if `REDIS_URL` is set, backend startup fails loudly instead of silently downgrading
-- if Redis is not configured at all, the app still works in single-node mode
-
-## Questions You Should Be Ready To Answer
-
-These are the most likely interview questions for this project.
-
-### HLD-style questions
-
-- Draw the architecture and explain the flow of an edit.
-- Why did you choose Socket.io instead of plain WebSocket?
-- Why is Redis needed for scaling?
-- Why keep Socket.io and Redis after adding Yjs?
-- Why use MongoDB here?
-- How does live restore work without reloading the page?
-- What are the bottlenecks in the current design?
-- How would you take this to production?
-- What is still missing after the Yjs phase?
-
-### LLD-style questions
-
-- What socket events exist and what do they do?
-- How do you ensure document isolation?
-- How do you catch up a newly joined client to the latest state?
-- How do you avoid cursor flicker or drift?
-- How do you clean up stale cursors?
-- How do you sync presence for a newly joined collaborator?
-- How do you create and cap version history?
-- What happens to connected collaborators when one user restores a version?
-- How is collaborator identity handled today?
-- Why is autosave periodic instead of immediate?
-- What happens if a user disconnects mid-edit?
-- Where is authorization enforced and why not only in the frontend?
-- How do legacy unowned documents behave after auth is added?
-
-## Good Tradeoffs To Mention
-
-Interviewers like hearing tradeoffs, not just features.
-
-### Current good tradeoffs
-
-- Socket.io over raw WebSocket for faster delivery and room support
-- Yjs for correctness in content convergence
-- MongoDB for fast iteration with JSON-shaped companion data
-- periodic autosave instead of write-on-every-keystroke
-- timed checkpoints instead of versioning every autosave tick
-- Redis adapter only when scaling is needed
-- custom cursor manager for performance-sensitive rendering on top of awareness state
-- JWT auth as a simple first production-grade identity layer before adding OAuth or enterprise auth
-
-### Current acknowledged limitations
-
-- no password reset, OAuth, refresh-token rotation, read-only role, invitation flow, team model, or audit log yet
-- no production observability stack yet
-
-## What You Can Claim Today
-
-You can honestly say:
-
-- you built a real-time collaborative editor
-- you modularized the backend into layered responsibilities
-- you migrated content sync to Yjs-based CRDT updates
-- you implemented Yjs awareness-based presence and remote cursor tracking with drift correction
-- you added Redis-based cross-instance Socket.io scaling
-- you added timed version history with live restore
-- you built an automated test harness for backend service logic, socket events, and the history sidebar
-- you added Playwright browser smoke tests for multi-client collaboration flows
-- you documented single-node and Redis-scaled local validation flows
-- you added JWT authentication and document-level owner/editor access control
-
-You should not yet say:
-
-- the system has enterprise-grade auth features such as OAuth, password reset, refresh-token rotation, or audit logs
-- the system has production-grade deployment orchestration
-
-## Fast Answer Templates
-
-### If asked for the HLD in 30 seconds
-
-> The system has a React and Quill frontend, a Node.js Socket.io realtime backend, JWT authentication, Yjs as the shared content and awareness model, MongoDB for users/document state/history, and optional Redis pub/sub for horizontal scaling. Each document maps to a socket room after access control passes, so content updates and awareness updates stay isolated by document ID.
-
-### If asked for the LLD in 30 seconds
-
-> At low level, the client authenticates, loads a persisted Yjs baseline by document ID, binds Quill to a local Yjs document, attaches a Yjs awareness instance for `{ user, cursor }`, emits Yjs updates for content, and emits throttled awareness updates for presence. The backend authenticates the socket, enforces owner/editor access before joining the room, broadcasts room-scoped events, stores autosaved Yjs state plus timed history checkpoints in MongoDB, and when Redis is enabled those events propagate across backend instances.
-
-### If asked what the next serious engineering step is
-
-> The next major steps are production hardening: observability, deployment automation, richer auth roles/invitations, and possibly audit logs now that content sync, presence, restoreable history, Docker packaging, and authenticated access control are already in place.
+> Built a scalable CRDT-based collaborative editor using React, Yjs, Java Spring Boot WebSockets, Redis Pub/Sub, MongoDB, and JWT authentication with document-level access control, live presence, version history, and restore.

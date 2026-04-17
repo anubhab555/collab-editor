@@ -1,0 +1,30 @@
+server:
+  port: ${SOCKET_PORT:3001}
+
+spring:
+  application:
+    name: collab-editor-backend
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://127.0.0.1:27017/collab-editor}
+    redis:
+      url: ${REDIS_URL:redis://127.0.0.1:6379}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+collab:
+  cors:
+    allowed-origins: ${CLIENT_ORIGIN:http://localhost:3000,http://localhost:3003,http://127.0.0.1:3000,http://127.0.0.1:3003}
+  redis:
+    enabled: ${REDIS_ENABLED:false}
+    channel: ${REDIS_CHANNEL:collab-editor:realtime}
+  security:
+    jwt-secret: ${JWT_SECRET:collab-editor-dev-secret-change-before-prod-32-bytes}
+    jwt-expires-in-seconds: ${JWT_EXPIRES_IN_SECONDS:604800}
+  auth-rate-limit:
+    max-requests: ${AUTH_RATE_LIMIT_MAX:30}
+    window-ms: ${AUTH_RATE_LIMIT_WINDOW_MS:900000}

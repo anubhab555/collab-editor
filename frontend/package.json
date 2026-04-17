@@ -12,7 +12,6 @@
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.13.1",
     "react-scripts": "5.0.1",
-    "socket.io-client": "^4.8.3",
     "uuid": "^13.0.0",
     "web-vitals": "^2.1.4",
     "y-protocols": "^1.0.7",
@@ -21,7 +20,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "start:socket3002": "cross-env PORT=3003 REACT_APP_SOCKET_URL=http://localhost:3002 REACT_APP_API_URL=http://localhost:3002/api react-scripts start",
+    "start:backend3002": "cross-env PORT=3003 REACT_APP_SOCKET_URL=http://localhost:3002 REACT_APP_API_URL=http://localhost:3002/api react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "test:ci": "cross-env CI=true react-scripts test --watchAll=false --runInBand --testMatch \"**/src/**/*.{spec,test}.{js,jsx,ts,tsx}\"",

@@ -1,97 +1,36 @@
 # Local Dev Setup
 
-This doc explains how to run the project locally without mixing startup instructions and testing instructions together.
+This runbook is for the Java Spring Boot backend version.
 
-Use this when you want:
+## Prerequisites
 
-- the right startup flow for your environment
-- a clean local reset flow
-- a separate test checklist after the app is running
+Install:
 
-## Startup Modes
+* Java 21
+* Node.js for React frontend tooling
+* MongoDB
+* Docker Desktop, if you want Redis or Docker Compose mode
 
-There are three normal ways to run the project locally.
+No global Gradle install is required. Use the checked-in Gradle wrapper: `backend/gradlew.bat` on Windows or `backend/gradlew` on Unix-like shells.
 
-### 1. Single-node mode
+## Install Frontend Dependencies
 
-Use this when you want the app to work without Redis.
+```bash
+cd frontend
+npm install
+```
 
-What runs:
-
-1. MongoDB
-2. one backend instance
-3. one frontend instance
-
-What you get:
-
-- registration/login
-- document ownership and sharing
-- real-time editing
-- active-user roster and remote cursors
-- autosave and reload
-- version checkpoints and live restore
-
-What you do not get:
-
-- cross-instance event propagation
-
-### 2. Redis-scaled mode
-
-Use this when you want to validate the distributed realtime flow.
-
-What runs:
-
-1. MongoDB
-2. Redis
-3. backend instance on `:3001`
-4. backend instance on `:3002`
-5. frontend instance on `:3000`
-6. frontend instance on `:3003`
-
-What you get:
-
-- authenticated collaboration across two app origins
-- text sync across backend instances
-- presence roster and cursor sync across backend instances
-- version history updates across backend instances
-- proof that Socket.io events propagate through Redis pub/sub
-
-### 3. Docker Compose mode
-
-Use this when you want the packaged full stack instead of separate local processes.
-
-What runs:
-
-1. frontend container on `:3000`
-2. backend container on `:3001`
-3. MongoDB container
-4. Redis container
-
-What you get:
-
-- a production-style startup flow
-- same-origin Socket.io through the Nginx frontend container
-- the current collaboration stack in one packaged runtime
-- a clean path for container-based smoke testing
+The backend uses Gradle, so there is no backend `npm install`.
 
 ## MongoDB
 
-MongoDB stores the autosaved document state.
-
-The backend defaults to:
+Default URI:
 
 ```text
 mongodb://127.0.0.1:27017/collab-editor
 ```
 
-### If Windows MongoDB service is already running
-
-Use that directly.
-You do not need `npm run mongo:start`.
-
-### If you need the repo-managed fallback MongoDB process
-
-Run these from the repo root:
+Repo helper scripts:
 
 ```bash
 npm run mongo:start
@@ -100,119 +39,28 @@ npm run mongo:stop
 npm run mongo:reset
 ```
 
-Notes:
+If your Windows MongoDB service is already running, you can skip `npm run mongo:start`.
 
-- `mongo:start` is a fallback local `mongod` flow
-- `mongo:reset` is only for the repo-managed fallback MongoDB process
-- local fallback MongoDB data lives in `%LOCALAPPDATA%\collab-editor\mongo\data`
-- local fallback MongoDB logs live in `%TEMP%\collab-editor-mongod.log`
+## Single Backend Startup
 
-## Redis
-
-Redis is only needed for Redis-scaled mode.
-
-For local development on this machine, Redis is started with Docker.
-
-### Redis Docker commands
-
-First-time container creation:
-
-```bash
-docker run --name collab-redis -p 6379:6379 -d redis:7
-```
-
-Normal daily start:
-
-```bash
-docker start collab-redis
-```
-
-Stop Redis:
-
-```bash
-docker stop collab-redis
-```
-
-Important:
-
-- `docker stop collab-redis` is the recommended outage test
-- pausing Docker Engine is not the best failure simulation because it can freeze dependencies instead of producing a clean Redis connection failure
-
-## Startup Flows
-
-### Single-node startup
-
-#### Service-managed MongoDB
-
-```bash
-cd backend
-npm run devStart
-cd ../frontend
-npm start
-```
-
-#### Repo-managed fallback MongoDB
+Terminal 1:
 
 ```bash
 npm run mongo:start
-cd backend
-npm run devStart
-cd ../frontend
-npm start
 ```
 
-### Redis-scaled startup
-
-1. Start Redis:
-
-```bash
-docker start collab-redis
-```
-
-2. Make sure MongoDB is available:
-
-- if Windows MongoDB service is running, use that
-- otherwise run `npm run mongo:start`
-
-3. Start backend instance 1:
+Terminal 2:
 
 ```bash
 cd backend
-npm run devStart:redis
+.\gradlew.bat bootRun
 ```
 
-4. Start backend instance 2:
-
-```bash
-cd backend
-npm run devStart:redis:3002
-```
-
-5. Start frontend instance 1:
+Terminal 3:
 
 ```bash
 cd frontend
 npm start
-```
-
-6. Start frontend instance 2:
-
-```bash
-cd frontend
-npm run start:socket3002
-```
-
-Notes:
-
-- the backend allows both `http://localhost:3000` and `http://localhost:3003` by default for this flow
-- `localhost:3000` and `localhost:3003` are different origins, so they naturally use different browser storage and appear as different collaborators
-
-### Docker Compose startup
-
-Run these from the repo root:
-
-```bash
-npm run docker:up
 ```
 
 Open:
@@ -221,164 +69,160 @@ Open:
 http://localhost:3000
 ```
 
-Useful commands:
+On Unix-like shells, use `./gradlew bootRun`.
+
+## Redis-Scaled Startup
+
+Start Redis:
 
 ```bash
+docker start collab-redis
+```
+
+If needed:
+
+```bash
+docker run --name collab-redis -p 6379:6379 -d redis:7
+```
+
+Backend A:
+
+```bash
+cd backend
+.\gradlew.bat bootRun --args="--SOCKET_PORT=3001 --REDIS_ENABLED=true --REDIS_URL=redis://127.0.0.1:6379 --CLIENT_ORIGIN=http://localhost:3000,http://localhost:3003,http://127.0.0.1:3000,http://127.0.0.1:3003"
+```
+
+Backend B:
+
+```bash
+cd backend
+.\gradlew.bat bootRun --args="--SOCKET_PORT=3002 --REDIS_ENABLED=true --REDIS_URL=redis://127.0.0.1:6379 --CLIENT_ORIGIN=http://localhost:3000,http://localhost:3003,http://127.0.0.1:3000,http://127.0.0.1:3003"
+```
+
+Frontend A:
+
+```bash
+cd frontend
+npm start
+```
+
+Frontend B:
+
+```bash
+cd frontend
+npm run start:backend3002
+```
+
+Open:
+
+* `http://localhost:3000`
+* `http://localhost:3003`
+
+## Docker Compose Startup
+
+```bash
+npm run docker:up
 npm run docker:logs
 npm run docker:down
 ```
 
-Notes:
+Docker Compose builds the Spring Boot backend with the Gradle wrapper inside Docker.
 
-- the Compose stack includes `frontend`, `backend`, `mongodb`, and `redis`
-- the frontend is a production React build served by Nginx
-- Nginx proxies `/socket.io/` to the backend container, so the browser stays on one origin
-- the backend exposes `GET /healthz` for container health checks
-- `docker:down` preserves MongoDB volume data by default
+## Manual Smoke Test
 
-## Clean Start Flow
+1. Register user A.
+2. Create or open a document.
+3. Register user B in another browser profile or another frontend origin.
+4. Share the document with user B's email.
+5. Open the shared document as user B.
+6. Type from both users and verify content sync.
+7. Verify the active collaborator list.
+8. Move cursors and verify remote cursor labels.
+9. Wait for autosave, refresh, and verify persistence.
+10. Keep editing long enough for a checkpoint.
+11. Restore an older version and verify both users update live.
 
-### If you are using the repo-managed fallback MongoDB process
+## Redis Smoke Test
 
-```bash
-npm run mongo:reset
-npm run mongo:start
-cd backend
-npm run devStart
-cd ../frontend
-npm start
-```
-
-### If you are using the Windows MongoDB service
-
-Do not use `mongo:reset`, because that script is file-based and is meant for the repo-managed fallback process.
-
-Instead:
-
-1. keep the MongoDB service running
-2. clear the `collab-editor` database from MongoDB Compass if you want a clean app state
-3. start the backend and frontend normally
-
-## Auth And Collaborator Identity
-
-The app now uses JWT authentication. The frontend stores the auth token and sanitized user profile in `localStorage`.
-
-That means:
-
-- the same browser profile stays logged in as the same user across tabs and documents
-- normal tabs in the same browser usually represent the same collaborator
-- remote cursor rendering for your own user id is intentionally ignored
-- a second user must be registered separately and granted document access before they can join a protected document
-
-If you want to test different collaborators in single-node mode, use:
-
-- normal window plus incognito/private window
-- two browser profiles
-- or two different browsers
-
-In Redis-scaled mode, `localhost:3000` and `localhost:3003` already count as different origins, so they naturally keep separate auth sessions. You still need to share the document with the second registered user's email before opening it as that user.
-
-## Testing
-
-### Automated test commands
-
-Run these before manual smoke testing:
-
-```bash
-cd backend
-npm test
-
-cd frontend
-npm run test:ci
-```
-
-Current automated coverage includes:
-
-- backend auth service rules for registration, login, token validation, and protected user lookup
-- backend document access rules for ownership, listing, sharing, and unauthorized access rejection
-- backend document-service rules for checkpoints, retention, and restore backups
-- backend socket integration for history fetch, awareness relay, awareness cleanup, and live restore broadcast
-- frontend presence-panel and version-history sidebar rendering behavior
-- Playwright single-node browser smoke across two authenticated browser contexts
-- Playwright Redis-backed browser smoke across `localhost:3000` and `localhost:3003` with authenticated document sharing
-- Playwright Docker Compose browser smoke through the packaged full stack
-
-### Browser E2E commands
-
-Run these from the repo root:
-
-```bash
-npm run e2e:single
-npm run e2e:redis
-npm run e2e:docker
-npm run e2e
-```
-
-Notes:
-
-- `e2e:single` starts MongoDB if needed, then boots one backend and one frontend, and runs the Playwright multi-context collaboration smoke test
-- `e2e:redis` starts MongoDB if needed, expects Docker Desktop and the Docker engine to be running, ensures the `collab-redis` container is available, then boots two backends and two frontends before running the cross-backend Playwright smoke test
-- `e2e:docker` starts the full Docker Compose stack, waits for health checks, runs the browser smoke test through `http://127.0.0.1:3000`, and then tears the stack down
-- `e2e` runs the single-node, Redis-backed, and Docker Compose suites in sequence
-
-### Single-node checklist
-
-1. Start MongoDB, backend, and frontend.
-2. Register or log in as user A.
-3. Create or open a document and verify user A is shown as owner.
-4. Register or log in as user B in a different browser storage context.
-5. Share user A's document with user B's email from the access panel.
-6. Open the same document as user B and verify text sync works in real time.
-7. Type concurrently in both sessions and verify the document converges cleanly.
-8. Open a different document in a third session and verify it stays isolated.
-9. Type in a document, wait 2 seconds, refresh, and verify the document reloads from MongoDB.
-10. Verify both names appear in the active-collaborators roster.
-11. Move the caret, type before another user's caret, and verify the remote cursor label appears and cursor drift correction looks reasonable.
-12. Blur one editor, close one tab, or switch one tab to another document and verify the old cursor disappears and the roster updates.
-13. Join a third authorized client after active edits but before autosave and verify it catches up to the latest in-memory state.
-14. Keep editing for more than 30 seconds and verify a checkpoint appears in the history panel.
-15. Restore an older version and verify the document updates immediately without a page refresh.
-16. Refresh after restore and verify the restored content persists.
-17. If you have a document created before the Yjs migration, reopen it while authenticated and verify it is claimed, resaves, and starts accumulating history correctly.
-
-### Redis-scaled checklist
-
-1. Start Redis, MongoDB, both backends, and both frontends.
-2. Register or log in as user A on `localhost:3000`.
-3. Register or log in as user B on `localhost:3003`.
-4. Create/open a document as user A and share it with user B's email.
-5. Open the same document as user B.
-6. Verify text sync works across backend instances.
-7. Type concurrently in both frontends and verify the document converges correctly across backends.
-8. Verify the active-collaborators roster and cursor sync both work across backend instances.
-9. Keep editing for more than 30 seconds and verify the history panel updates across both frontend instances.
-10. Restore a version from one frontend and verify the second frontend updates immediately.
-11. Join a third authorized client after active edits but before autosave and verify peer catch-up still works.
-12. Open a different document in one frontend and verify document isolation still holds.
-13. Edit from both frontends, wait 2 seconds, refresh, and verify persistence still works.
-
-### Redis failure test
-
-1. Stop Redis:
+1. Run two Spring Boot backend instances with `REDIS_ENABLED=true`.
+2. Run two frontend instances on `3000` and `3003`.
+3. Open the same shared document from both frontends.
+4. Verify edits, presence, history updates, and restore events cross backend instances.
+5. Stop Redis with:
 
 ```bash
 docker stop collab-redis
 ```
 
-2. Rerun:
+Then restart a Redis-enabled backend and verify it fails loudly if Redis is unavailable.
+
+## Operational Checks
+
+Backend:
+
+```text
+http://localhost:3001/healthz
+http://localhost:3001/readyz
+http://localhost:3001/metrics
+```
+
+Expected:
+
+* `/healthz` returns `status: ok`
+* `/readyz` returns `status: ready` when MongoDB is connected
+* `/metrics` returns Prometheus-style metrics
+
+## Tests
+
+Backend:
+
+```bash
+npm run test:backend
+```
+
+Frontend:
+
+```bash
+npm run test:frontend
+cd frontend
+npm run build
+```
+
+E2E:
+
+```bash
+npm run e2e:single
+npm run e2e:redis
+npm run e2e:docker
+```
+
+## Common Issues
+
+### Gradle command confusion
+
+Use the checked-in wrapper from the backend folder:
 
 ```bash
 cd backend
-npm run devStart:redis
+.\gradlew.bat bootRun
 ```
 
-3. Confirm the backend fails loudly instead of silently falling back.
+On Unix-like shells, use `./gradlew bootRun`.
 
-## What To Test Next
+### WebSocket does not connect
 
-After the Docker packaging phase, the next meaningful improvements are:
+Check:
 
-- production-grade observability and deployment automation
-- richer auth hardening such as password reset, invitations, read-only roles, or audit logs
+* frontend `REACT_APP_SOCKET_URL`
+* backend `CLIENT_ORIGIN`
+* valid JWT in browser storage
+* backend is running on the expected port
 
-That keeps the roadmap focused on production hardening now that transport scaling, CRDT content sync, awareness-based presence, restoreable history, and authenticated access control are already in place.
+### Redis mode does not sync across instances
+
+Check:
+
+* `REDIS_ENABLED=true`
+* `REDIS_URL=redis://127.0.0.1:6379`
+* Redis container is running
+* both backends use the same MongoDB database

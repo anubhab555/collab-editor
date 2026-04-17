@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Quill from "quill"
 import "quill/dist/quill.snow.css"
-import { io } from "socket.io-client"
 import { useNavigate, useParams } from "react-router-dom"
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from "y-protocols/awareness"
 import * as Y from "yjs"
@@ -12,6 +11,7 @@ import { apiRequest } from "./api"
 import CursorManager from "./CursorManager"
 import DocumentAccessPanel from "./DocumentAccessPanel"
 import PresencePanel from "./PresencePanel"
+import RealtimeClient from "./realtimeClient"
 import VersionHistoryPanel from "./VersionHistoryPanel"
 
 
@@ -526,11 +526,7 @@ export default function TextEditor() {
     useEffect(() => {
         if (!token) return undefined
 
-        const s = io(SOCKET_SERVER_URL, {
-            auth: {
-                token,
-            },
-        })
+        const s = new RealtimeClient(SOCKET_SERVER_URL, { token })
 
         const handleConnectError = (error) => {
             const statusCode = error?.data?.statusCode
